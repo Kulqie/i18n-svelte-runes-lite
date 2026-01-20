@@ -1,0 +1,23 @@
+# Source (compiled output is in dist/)
+src/
+
+# Config files
+tsconfig.json
+svelte.config.js
+vitest.config.ts
+
+# Development
+.claude/
+.DS_Store
+tests/
+examples/
+node_modules/
+
+# Build artifacts
+repomix-output.xml
+*.bak
+*.log
+
+# Git
+.git/
+.gitignore

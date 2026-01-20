@@ -1,0 +1,105 @@
+{
+	"name": "i18n-svelte-runes-lite",
+	"version": "0.1.0",
+	"description": "Lightweight i18n library for Svelte 5 with runes support. Type-safe translations, SSR-ready, lazy loading, and Intl formatters.",
+	"type": "module",
+	"svelte": "./dist/index.svelte.js",
+	"types": "./dist/index.svelte.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.svelte.d.ts",
+			"svelte": "./dist/index.svelte.js",
+			"default": "./dist/index.svelte.js"
+		},
+		"./config": {
+			"types": "./dist/config.d.ts",
+			"default": "./dist/config.js"
+		},
+		"./context": {
+			"types": "./dist/context.svelte.d.ts",
+			"svelte": "./dist/context.svelte.js",
+			"default": "./dist/context.svelte.js"
+		},
+		"./core": {
+			"types": "./dist/core.d.ts",
+			"default": "./dist/core.js"
+		},
+		"./types": {
+			"types": "./dist/types.d.ts",
+			"default": "./dist/types.js"
+		},
+		"./server": {
+			"types": "./dist/server.d.ts",
+			"default": "./dist/server.js"
+		},
+		"./Trans.svelte": {
+			"types": "./dist/Trans.svelte.d.ts",
+			"svelte": "./dist/Trans.svelte",
+			"default": "./dist/Trans.svelte"
+		},
+		"./TransRich.svelte": {
+			"types": "./dist/TransRich.svelte.d.ts",
+			"svelte": "./dist/TransRich.svelte",
+			"default": "./dist/TransRich.svelte"
+		}
+	},
+	"bin": {
+		"i18n-translate": "./scripts/translate.js",
+		"i18n-runes": "./scripts/cli.js"
+	},
+	"files": [
+		"dist",
+		"scripts/translate.js",
+		"scripts/cli.js",
+		"scripts/cli/",
+		"README.md"
+	],
+	"scripts": {
+		"build": "svelte-package -i src -o dist",
+		"check": "svelte-check --tsconfig ./tsconfig.json",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage",
+		"prepublishOnly": "npm run build && publint",
+		"translate": "node scripts/translate.js",
+		"translate:dry": "node scripts/translate.js --dry-run"
+	},
+	"keywords": [
+		"svelte",
+		"svelte5",
+		"runes",
+		"i18n",
+		"internationalization",
+		"translation",
+		"localization",
+		"intl",
+		"ssr",
+		"sveltekit",
+		"type-safe"
+	],
+	"author": "Kulqie",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/kulqie/i18n-svelte-runes-lite.git"
+	},
+	"homepage": "https://github.com/kulqie/i18n-svelte-runes-lite#readme",
+	"bugs": {
+		"url": "https://github.com/kulqie/i18n-svelte-runes-lite/issues"
+	},
+	"peerDependencies": {
+		"svelte": "^5.0.0"
+	},
+	"devDependencies": {
+		"@sveltejs/kit": "^2.0.0",
+		"@sveltejs/package": "^2.3.0",
+		"@sveltejs/vite-plugin-svelte": "^4.0.0",
+		"@testing-library/svelte": "^5.2.0",
+		"jsdom": "^25.0.0",
+		"publint": "^0.2.0",
+		"svelte": "^5.0.0",
+		"svelte-check": "^4.0.0",
+		"typescript": "^5.5.0",
+		"vitest": "^2.1.0"
+	}
+}
