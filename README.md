@@ -213,6 +213,31 @@ const i18n = createI18n<Schema>({
 await i18n.setLocale('pl');
 ```
 
+## Project Setup CLI
+
+Automatically set up i18n in your Svelte/SvelteKit project:
+
+```bash
+npx i18n-runes init
+```
+
+The CLI will:
+- Detect your project type (SvelteKit, Wails/Desktop, or SPA)
+- Ask for your supported languages
+- Generate locale files with sample translations
+- Create the i18n configuration file
+- Update your Vite config if needed
+
+### Non-Interactive Mode
+
+For CI/CD or scripts, use:
+
+```bash
+I18N_YES=1 npx i18n-runes init
+```
+
+This uses defaults: English only, `src/lib/i18n/locales` path.
+
 ## Trans Component
 
 For simple translations with interpolation:

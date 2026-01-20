@@ -2,7 +2,9 @@
  * SPA Generator
  *
  * Generates i18n configuration files for simple Svelte SPA projects.
- * Uses setI18n()/useI18n() context pattern (NOT I18nProvider - that doesn't exist)
+ * Uses createI18n singleton pattern with exported t/setLocale functions.
+ *
+ * This matches the README's recommended pattern for desktop/SPA apps.
  */
 
 import fs from 'fs';
@@ -67,8 +69,11 @@ export default app;
 // ============================================================================
 
 /**
- * Generates or patches App.svelte with i18n context
- * Uses setI18n()/useI18n() pattern (NOT I18nProvider)
+ * Generates or patches App.svelte with i18n singleton pattern
+ * Uses createI18n singleton pattern (exports t, setLocale from index.svelte.ts)
+ *
+ * This matches the README's recommended pattern for SPA apps.
+ *
  * @param {object} config - Generation config
  * @returns {{ file: string | null, error?: string }}
  */
@@ -85,55 +90,42 @@ function generateApp(config) {
         let content = fs.readFileSync(appPath, 'utf8');
 
         // Check if already has i18n
-        if (content.includes('i18n-svelte-runes-lite') || content.includes('setI18n')) {
+        if (content.includes('i18n-svelte-runes-lite') || content.includes("from '$lib/i18n'") || content.includes("from './lib/i18n'")) {
             return { file: null, error: 'App.svelte already has i18n configuration' };
         }
 
         // Can't easily patch, return instructions
         return {
             file: null,
-            error: `Please manually update App.svelte. Add setI18n in the root component:
+            error: `Please manually update App.svelte. Import t and setLocale:
   <script>
-    import { setI18n, useI18n } from 'i18n-svelte-runes-lite';
-    import { locales, defaultLocale } from '${i18nImportPath}';
-
-    setI18n({ translations: locales, initialLocale: defaultLocale });
-    const i18n = useI18n();
+    import { t, setLocale, supportedLocales } from '${i18nImportPath}';
   </script>
 
-  <h1>{i18n.t('hello')}</h1>`
+  <h1>{t('hello')}</h1>
+  <button onclick={() => setLocale('pl')}>Polski</button>`
         };
     }
 
-    // Create new App.svelte using setI18n pattern
+    // Create new App.svelte using singleton pattern
     const scriptLang = isTypeScript ? ' lang="ts"' : '';
 
     const content = `<script${scriptLang}>
-    import { setI18n, useI18n } from 'i18n-svelte-runes-lite';
-    import { locales, defaultLocale, supportedLocales } from '${i18nImportPath}';
-
-    // Initialize i18n context (must be in root component)
-    setI18n({
-        translations: locales,
-        initialLocale: defaultLocale
-    });
-
-    // Get the i18n instance for use in this component
-    const i18n = useI18n();
+    import { t, setLocale, supportedLocales } from '${i18nImportPath}';
 
     function handleLocaleChange(e${isTypeScript ? ': Event' : ''}) {
         const target = e.target${isTypeScript ? ' as HTMLSelectElement' : ''};
-        i18n.setLocale(target.value);
+        setLocale(target.value);
     }
 </script>
 
 <main>
-    <h1>{i18n.t('hello')}</h1>
-    <p>{i18n.t('welcome')}</p>
+    <h1>{t('hello')}</h1>
+    <p>{t('welcome')}</p>
 
     <div class="locale-switcher">
         <label for="locale">Language:</label>
-        <select id="locale" value={i18n.locale} onchange={handleLocaleChange}>
+        <select id="locale" onchange={handleLocaleChange}>
             {#each supportedLocales as loc}
                 <option value={loc}>{loc.toUpperCase()}</option>
             {/each}

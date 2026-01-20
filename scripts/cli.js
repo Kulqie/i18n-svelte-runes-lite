@@ -639,15 +639,19 @@ async function runInit() {
         }
 
         // Step 6: Next steps
+        const exampleImport = framework === 'sveltekit'
+            ? "import { useI18n } from 'i18n-svelte-runes-lite/context';\n    const { t } = useI18n();"
+            : "import { t } from '$lib/i18n';";
+
         console.log(`
 ${styles.bold}${styles.cyan}Next steps:${styles.reset}
 
   1. Review the generated files
   2. Add translations to your locale files
-  3. Import and use the i18n context in your components
+  3. Import and use t() in your components
 
   ${styles.bold}Example usage:${styles.reset}
-    import { t } from '$lib/i18n';
+    ${exampleImport}
 
     <p>{t('hello')}</p>
 

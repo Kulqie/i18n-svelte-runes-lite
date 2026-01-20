@@ -682,14 +682,30 @@ export type Translations = typeof import('./locales/${defaultLanguage}.json');
 `;
     }
 
-    // SPA/Wails version - just export data, App.svelte handles setI18n()
-    return `${imports}
+    // SPA/Wails version - use createI18n singleton pattern
+    // This matches the README's recommended pattern for desktop apps
+    const defaultIdentifier = localeToIdentifier(defaultLanguage);
+    const typeAnnotation = isTypeScript ? `<typeof ${defaultIdentifier}>` : '';
 
-export const locales = {
-${localesObject}
-};
+    // Add extra indentation for translations object (8 spaces total)
+    const translationsObject = languages.map(lang => {
+        const identifier = localeToIdentifier(lang);
+        return identifier === lang ? `        ${lang}` : `        '${lang}': ${identifier}`;
+    }).join(',\n');
 
-export const defaultLocale = '${defaultLanguage}';
+    return `import { createI18n } from 'i18n-svelte-runes-lite';
+${imports}
+
+const i18n = createI18n${typeAnnotation}({
+    translations: {
+${translationsObject}
+    },
+    initialLocale: '${defaultLanguage}'
+});
+
+export const t = i18n.t;
+export const setLocale = i18n.setLocale;
+export const locale = i18n.locale;
 export const supportedLocales = [${languages.map(l => `'${l}'`).join(', ')}];
 `;
 }
