@@ -103,7 +103,7 @@ If you already have these properties, merge the arrays:
  * @returns {Promise<{ success: boolean, file?: string, error?: string }>}
  */
 export async function patchViteConfig(config) {
-    const { cwd, isTypeScript } = config;
+    const { cwd, isTypeScript, framework } = config;
 
     // Find vite config file
     const viteConfigPath = isTypeScript
@@ -128,7 +128,7 @@ export async function patchViteConfig(config) {
     }
 
     // Read existing config
-    const content = fs.readFileSync(configPath, 'utf8');
+    let content = fs.readFileSync(configPath, 'utf8');
 
     // Check if already patched
     if (content.includes('i18n-svelte-runes-lite')) {
@@ -150,10 +150,29 @@ export async function patchViteConfig(config) {
     // Create backup
     createBackup(configPath);
 
+    // For non-SvelteKit projects, try to add $lib alias
+    const warnings = [];
+    if (framework !== 'sveltekit') {
+        const hasLibAlias = /\$lib\s*:/.test(content) || /['"]?\$lib['"]?\s*:/.test(content);
+        const hasResolveAlias = /\bresolve\s*:\s*\{[\s\S]*alias/.test(content);
+
+        if (!hasLibAlias) {
+            // Try to add $lib alias
+            const patchedWithAlias = patchLibAlias(content);
+            if (patchedWithAlias !== content) {
+                content = patchedWithAlias;
+            } else if (!hasResolveAlias) {
+                warnings.push('Add $lib alias: resolve: { alias: { $lib: path.resolve("./src/lib") } }');
+            } else {
+                warnings.push('Add to resolve.alias: $lib: path.resolve("./src/lib")');
+            }
+        }
+    }
+
     // Patch the config with only the missing properties
     const patched = patchViteContent(content, !hasOptimizeDeps, !hasSsr);
 
-    if (patched === content) {
+    if (patched === content && warnings.length === 0) {
         return {
             success: false,
             error: `Could not automatically patch ${path.basename(configPath)}.\n${MANUAL_INSTRUCTIONS}`
@@ -163,14 +182,108 @@ export async function patchViteConfig(config) {
     fs.writeFileSync(configPath, patched, 'utf8');
 
     // Warn if we only added partial config
-    let warning = null;
     if (hasOptimizeDeps) {
-        warning = 'Note: optimizeDeps already exists. Please manually add i18n-svelte-runes-lite to optimizeDeps.exclude';
-    } else if (hasSsr) {
-        warning = 'Note: ssr already exists. Please manually add i18n-svelte-runes-lite to ssr.noExternal';
+        warnings.push('Add i18n-svelte-runes-lite to optimizeDeps.exclude');
+    }
+    if (hasSsr) {
+        warnings.push('Add i18n-svelte-runes-lite to ssr.noExternal');
     }
 
-    return { success: true, file: path.basename(configPath), error: warning };
+    return {
+        success: true,
+        file: path.basename(configPath),
+        error: warnings.length > 0 ? 'Manual steps needed:\n  - ' + warnings.join('\n  - ') : null
+    };
+}
+
+/**
+ * Try to patch $lib alias into existing vite config
+ * @param {string} content - Existing config content
+ * @returns {string} - Patched content (unchanged if patching fails)
+ */
+function patchLibAlias(content) {
+    // Check if path is already imported
+    const hasPathImport = /import\s+(?:\*\s+as\s+)?path\s+from\s+['"]path['"]/.test(content) ||
+                          /import\s+\{\s*[^}]*\s*\}\s+from\s+['"]path['"]/.test(content) ||
+                          /const\s+path\s*=\s*require\s*\(\s*['"]path['"]\s*\)/.test(content);
+
+    let result = content;
+
+    // Add path import if not present
+    if (!hasPathImport) {
+        // Find the first import statement and add path import before it
+        const importMatch = result.match(/^import\s+/m);
+        if (importMatch) {
+            result = result.slice(0, importMatch.index) +
+                     "import path from 'path';\n" +
+                     result.slice(importMatch.index);
+        } else {
+            // No imports found, add at the beginning
+            result = "import path from 'path';\n\n" + result;
+        }
+    }
+
+    // Check if resolve.alias already exists
+    const hasResolveAlias = /\bresolve\s*:\s*\{[\s\S]*?alias\s*:/.test(result);
+
+    if (hasResolveAlias) {
+        // Try to add $lib to existing alias object
+        // Match: alias: { ... } and insert $lib
+        const aliasMatch = result.match(/(\balias\s*:\s*\{)([^}]*?)(\})/);
+        if (aliasMatch) {
+            const [full, start, existing, end] = aliasMatch;
+            const trimmedExisting = existing.trim();
+            const needsComma = trimmedExisting && !trimmedExisting.endsWith(',');
+            const newAlias = `${start}${existing}${needsComma ? ',' : ''}\n            $lib: path.resolve('./src/lib')\n        ${end}`;
+            result = result.replace(full, newAlias);
+        } else {
+            return content; // Can't patch
+        }
+    } else {
+        // Check if resolve exists but without alias
+        const hasResolve = /\bresolve\s*:\s*\{/.test(result);
+
+        if (hasResolve) {
+            // Add alias to existing resolve
+            const resolveMatch = result.match(/(\bresolve\s*:\s*\{)([^}]*?)(\})/);
+            if (resolveMatch) {
+                const [full, start, existing, end] = resolveMatch;
+                const trimmedExisting = existing.trim();
+                const needsComma = trimmedExisting && !trimmedExisting.endsWith(',');
+                const newResolve = `${start}${existing}${needsComma ? ',' : ''}\n        alias: {\n            $lib: path.resolve('./src/lib')\n        }\n    ${end}`;
+                result = result.replace(full, newResolve);
+            } else {
+                return content; // Can't patch
+            }
+        } else {
+            // Need to add entire resolve block - use similar strategy as buildViteI18nConfig
+            // Insert after plugins or at start of config object
+            const resolveConfig = `    // $lib alias for SvelteKit-like imports
+    resolve: {
+        alias: {
+            $lib: path.resolve('./src/lib')
+        }
+    },`;
+
+            // Try to insert after plugins array
+            const pluginsEndMatch = result.match(/plugins\s*:\s*\[[^\]]*\]\s*,?/);
+            if (pluginsEndMatch) {
+                const insertPos = pluginsEndMatch.index + pluginsEndMatch[0].length;
+                // Ensure there's a comma after plugins if not present
+                let insertion = resolveConfig;
+                if (!pluginsEndMatch[0].endsWith(',')) {
+                    insertion = ',\n' + resolveConfig;
+                } else {
+                    insertion = '\n' + resolveConfig;
+                }
+                result = result.slice(0, insertPos) + insertion + result.slice(insertPos);
+            } else {
+                return content; // Can't find safe insertion point
+            }
+        }
+    }
+
+    return result;
 }
 
 /**
