@@ -70,7 +70,7 @@ export default app;
 
 /**
  * Generates or patches App.svelte with i18n singleton pattern
- * Uses createI18n singleton pattern (exports t, setLocale from index.svelte.ts)
+ * Uses createI18n singleton pattern (exports t, setLocale from index.ts)
  *
  * This matches the README's recommended pattern for SPA apps.
  *

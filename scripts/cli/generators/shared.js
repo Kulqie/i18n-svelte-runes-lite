@@ -617,7 +617,12 @@ function generateSampleTranslations(lang, defaultLang, namespace) {
 // ============================================================================
 
 /**
- * Creates the locales index file (locales.ts or index.svelte.ts)
+ * Creates the locales index file (locales.ts for SvelteKit, index.ts for SPA/Wails)
+ *
+ * Note: For SPA/Wails we use index.ts (not index.svelte.ts) because:
+ * 1. The generated code doesn't use Svelte runes
+ * 2. Vite doesn't auto-resolve .svelte.ts for directory imports
+ *
  * @param {object} config - Generation config
  * @returns {Promise<{ file: string | null }>}
  */
@@ -628,7 +633,9 @@ export async function createLocalesIndex(config) {
     ensureDir(i18nDir);
 
     const ext = isTypeScript ? 'ts' : 'js';
-    const indexFileName = framework === 'sveltekit' ? `locales.${ext}` : `index.svelte.${ext}`;
+    // SvelteKit: locales.ts (separate file, context pattern uses it)
+    // SPA/Wails: index.ts (allows `import from '$lib/i18n'` directory import)
+    const indexFileName = framework === 'sveltekit' ? `locales.${ext}` : `index.${ext}`;
     const indexPath = path.join(i18nDir, indexFileName);
 
     // Don't overwrite if exists

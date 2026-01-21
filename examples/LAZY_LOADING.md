@@ -20,7 +20,7 @@ Lazy loading allows you to load translation files **on-demand**, reducing the in
 ### Step 1: Define Loaders
 
 ```typescript
-// src/lib/i18n/index.svelte.ts
+// src/lib/i18n/index.ts
 import { createI18n } from 'i18n-svelte-runes-lite';
 
 // Type definition
@@ -136,7 +136,7 @@ Load translations when navigating to a language-specific route:
 ### Detect and Pre-load Browser Language
 
 ```typescript
-// src/lib/i18n/index.svelte.ts
+// src/lib/i18n/index.ts
 import { browser } from '$app/environment';
 
 // Detect browser language
@@ -267,7 +267,7 @@ fr.chunk.js   35 KB  (loaded on demand)
 ## Error Handling
 
 ```typescript
-// src/lib/i18n/index.svelte.ts
+// src/lib/i18n/index.ts
 async function switchLocale(locale: string) {
     try {
         await setLocale(locale);

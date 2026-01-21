@@ -185,7 +185,7 @@ createI18n({
 No server hook needed - uses localStorage automatically:
 
 ```typescript
-// src/lib/i18n/index.svelte.ts
+// src/lib/i18n/index.ts
 import { createI18n } from 'i18n-svelte-runes-lite';
 import en from './locales/en.json';
 import pl from './locales/pl.json';

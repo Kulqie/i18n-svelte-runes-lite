@@ -16,11 +16,11 @@ This guide shows how to use `i18n-svelte-runes-lite` with the **singleton patter
 
 ### Step 1: Create i18n Instance
 
-Create `src/lib/i18n/index.svelte.ts`:
+Create `src/lib/i18n/index.ts`:
 
 ```typescript
-// src/lib/i18n/index.svelte.ts
-import { createI18n } from '$lib/i18n-svelte-runes-lite';
+// src/lib/i18n/index.ts
+import { createI18n } from 'i18n-svelte-runes-lite';
 import type enJSON from './locales/en.json';
 
 // Import translations
@@ -57,17 +57,7 @@ export default i18n;
 
 > **Automatic Persistence:** With `strategy: 'auto'` (default), the library detects Wails environment and automatically persists locale to `localStorage`. No manual setup needed!
 
-### Step 2: Create Public API
-
-Create `src/lib/i18n/index.ts`:
-
-```typescript
-// src/lib/i18n/index.ts
-// Re-export everything for easy importing
-export * from './index.svelte';
-```
-
-### Step 3: Use in Components
+### Step 2: Use in Components
 
 ```svelte
 <!-- src/App.svelte or any component -->
@@ -91,7 +81,7 @@ export * from './index.svelte';
 Even with singleton pattern, you can lazy load languages:
 
 ```typescript
-// src/lib/i18n/index.svelte.ts
+// src/lib/i18n/index.ts
 const i18n = createI18n<Schema>({
     translations: { en }, // Only load default
     loaders: {           // Lazy load others
@@ -132,7 +122,7 @@ const i18n = createI18n<Schema>({
 If you need to persist locale in Wails' Go backend instead of localStorage:
 
 ```typescript
-// src/lib/i18n/index.svelte.ts
+// src/lib/i18n/index.ts
 import { SaveLocale, LoadLocale } from '../../wailsjs/go/main/App';
 
 async function getSavedLocale(): Promise<string> {

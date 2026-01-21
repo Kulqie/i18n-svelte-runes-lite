@@ -335,14 +335,15 @@ function validateProjectRoot(cwd) {
  */
 function getPotentialFiles(framework, isTypeScript, localesPath) {
     const ext = isTypeScript ? 'ts' : 'js';
+    // SvelteKit uses locales.ts, SPA/Wails uses index.ts
+    const indexFileName = framework === 'sveltekit' ? `locales.${ext}` : `index.${ext}`;
     const files = [
         // Shared files
         `vite.config.${ext}`,
         `vite.config.${isTypeScript ? 'js' : 'ts'}`,  // Check both extensions
         // Locale files
         path.join(localesPath, 'en.json'),
-        path.join(path.dirname(localesPath), `locales.${ext}`),
-        path.join(path.dirname(localesPath), `index.svelte.${ext}`),
+        path.join(path.dirname(localesPath), indexFileName),
     ];
 
     if (framework === 'sveltekit') {
