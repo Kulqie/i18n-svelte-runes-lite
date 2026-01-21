@@ -83,7 +83,7 @@ const DEFAULTS = {
     localesDir: null,
     sourceLang: 'en',
     batchSize: 20,
-    sortKeys: true,  // Set to false to preserve key order/grouping
+    sortKeys: false,  // Set to true to sort keys alphabetically
     api: {
         url: 'https://api.openai.com/v1/chat/completions',
         model: 'gpt-4o-mini'
@@ -232,6 +232,7 @@ function parseArgs() {
         dryRun: false,
         noBackup: false,
         noSort: false,
+        sort: false,
         verbose: false,
         batchSize: null
     };
@@ -259,6 +260,9 @@ function parseArgs() {
                 break;
             case '--no-sort':
                 options.noSort = true;
+                break;
+            case '--sort':
+                options.sort = true;
                 break;
             case '--verbose':
             case '-v':
@@ -291,7 +295,8 @@ Options:
   --target, -t <lang>     Translate only this language
   --dry-run, -d           Show what would be translated without making changes
   --no-backup             Skip creating backup files
-  --no-sort               Preserve key order instead of sorting alphabetically
+  --sort                  Sort keys alphabetically
+  --no-sort               Preserve key order (default)
   --verbose, -v           Show detailed output
   --batch-size, -b <n>    Number of keys to translate per API call (default: 20)
   --help, -h              Show this help message
@@ -312,7 +317,7 @@ Example i18n.config.json:
     "localesDir": "src/lib/i18n/locales",
     "sourceLang": "en",
     "batchSize": 20,
-    "sortKeys": true,
+    "sortKeys": false,
     "api": {
       "url": "https://api.openai.com/v1/chat/completions",
       "model": "gpt-4o-mini"
@@ -875,10 +880,10 @@ function writeLocaleFile(filePath, data) {
 
 async function syncTranslations(config, cliOptions) {
     const { localesDir, sourceLang, batchSize } = config;
-    const { targetLang, dryRun, noBackup, noSort, verbose } = cliOptions;
+    const { targetLang, dryRun, noBackup, noSort, sort, verbose } = cliOptions;
 
-    // Determine if we should sort keys (CLI --no-sort overrides config)
-    const shouldSortKeys = noSort ? false : config.sortKeys;
+    // Determine if we should sort keys (CLI flags override config)
+    const shouldSortKeys = sort ? true : (noSort ? false : config.sortKeys);
 
     if (!localesDir) {
         console.error('Error: Could not find locales directory.');
