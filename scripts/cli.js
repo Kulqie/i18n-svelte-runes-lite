@@ -16,7 +16,9 @@
  *   node scripts/cli.js init
  *
  * Environment Variables:
- *   I18N_YES=1  - Skip prompts and use defaults (for CI)
+ *   I18N_YES=1       - Skip prompts and use defaults (for CI)
+ *   I18N_LANGS=en,pl - Languages to support (comma-separated)
+ *   I18N_TRANSLATE=1 - Setup LLM translation script
  */
 
 import readline from 'readline';
@@ -24,7 +26,7 @@ import { detect, detectMonorepo } from './cli/detect.js';
 import { generateSvelteKit } from './cli/generators/sveltekit.js';
 import { generateWails } from './cli/generators/wails.js';
 import { generateSPA } from './cli/generators/spa.js';
-import { patchViteConfig, createLocaleFiles, createLocalesIndex } from './cli/generators/shared.js';
+import { patchViteConfig, createLocaleFiles, createLocalesIndex, createEnvExample, patchPackageJson } from './cli/generators/shared.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -435,11 +437,16 @@ async function runInit() {
         }
 
         // Step 2: Get configuration
-        let languages = ['en'];
+        // I18N_LANGS="en,pl,de" sets languages in non-interactive mode
+        let languages = process.env.I18N_LANGS
+            ? process.env.I18N_LANGS.split(',').map(l => l.trim()).filter(Boolean)
+            : ['en'];
         let localesPath = 'src/lib/i18n/locales';
         // SvelteKit defaults to namespaced structure for better SSR support
         let useNamespaces = framework === 'sveltekit';
         let useMagicHook = framework === 'sveltekit';
+        // I18N_TRANSLATE=1 enables translate setup in non-interactive mode
+        let setupTranslate = process.env.I18N_TRANSLATE === '1';
 
         if (!isNonInteractive()) {
             // Languages - with validation and re-prompt loop
@@ -516,6 +523,14 @@ async function runInit() {
                     true
                 );
             }
+
+            // LLM Translation setup (optional)
+            if (languages.length > 1) {
+                setupTranslate = await prompt.confirm(
+                    'Setup LLM translation script? (requires OpenAI-compatible API)',
+                    false
+                );
+            }
         }
 
         // Step 3: Check for existing files
@@ -563,7 +578,8 @@ async function runInit() {
             localesPath,
             useNamespaces,
             useMagicHook,
-            isTypeScript
+            isTypeScript,
+            setupTranslate
         };
 
         const generatedFiles = [];
@@ -618,6 +634,25 @@ async function runInit() {
                 errors.push(...frameworkResult.errors);
             }
 
+            // LLM Translation setup (optional)
+            if (config.setupTranslate) {
+                const envResult = await createEnvExample(config);
+                if (envResult.file) {
+                    generatedFiles.push(envResult.file);
+                    rollback.track(envResult.file);
+                } else if (envResult.error) {
+                    errors.push(envResult.error);
+                }
+
+                const pkgResult = await patchPackageJson(config);
+                if (pkgResult.file) {
+                    generatedFiles.push(pkgResult.file);
+                    rollback.track(pkgResult.file);
+                } else if (pkgResult.error) {
+                    errors.push(pkgResult.error);
+                }
+            }
+
         } catch (e) {
             // Generation failed - rollback all changes
             rollback.rollback();
@@ -647,6 +682,14 @@ async function runInit() {
             ? "import { useI18n } from 'i18n-svelte-runes-lite/context';\n    const i18n = useI18n();\n    const { t, setLocale } = i18n;  // Functions safe to destructure"
             : "import { i18n, t, setLocale } from '$lib/i18n';";
 
+        const translateHint = config.setupTranslate
+            ? `
+  ${styles.bold}LLM Translation:${styles.reset}
+    1. Copy .env.example to .env and add your API key
+    2. Run: npm run translate
+`
+            : '';
+
         console.log(`
 ${styles.bold}${styles.cyan}Next steps:${styles.reset}
 
@@ -659,7 +702,7 @@ ${styles.bold}${styles.cyan}Next steps:${styles.reset}
 
     <p>{t('hello')}</p>
     <p>Current: {i18n.locale}</p>  <!-- Use i18n.locale for reactivity! -->
-
+${translateHint}
 ${styles.green}✓${styles.reset} Setup complete!
 `);
 

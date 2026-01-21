@@ -960,3 +960,96 @@ export async function initI18n(locale = defaultLocale, namespaces = ['common']) 
 }
 `;
 }
+
+// ============================================================================
+// LLM Translation Setup
+// ============================================================================
+
+/**
+ * Creates .env.example file with LLM translation placeholders
+ * @param {object} config - Generation config
+ * @returns {{ file: string | null, error?: string }}
+ */
+export async function createEnvExample(config) {
+    const { cwd, languages, defaultLanguage } = config;
+    const envPath = path.join(cwd, '.env.example');
+
+    // Don't overwrite existing .env.example
+    if (fs.existsSync(envPath)) {
+        const existing = fs.readFileSync(envPath, 'utf8');
+        if (existing.includes('OPENAI_API_KEY')) {
+            return { file: null, error: '.env.example already has OPENAI config' };
+        }
+        // Append to existing file
+        const appendContent = `
+# ============================================================================
+# i18n Translation (LLM)
+# ============================================================================
+# Run: npm run translate
+# Docs: https://github.com/kulqie/i18n-svelte-runes-lite#translation
+
+OPENAI_API_KEY=your-api-key-here
+# OPENAI_BASE_URL=https://api.openai.com/v1  # Optional: for local LLMs (Ollama, etc.)
+# OPENAI_MODEL=gpt-4o-mini                    # Optional: model to use
+`;
+        fs.appendFileSync(envPath, appendContent, 'utf8');
+        return { file: envPath };
+    }
+
+    // Create new .env.example
+    const targetLangs = languages.filter(l => l !== defaultLanguage);
+    const content = `# ============================================================================
+# i18n Translation (LLM)
+# ============================================================================
+# Run: npm run translate
+# Docs: https://github.com/kulqie/i18n-svelte-runes-lite#translation
+#
+# Source language: ${defaultLanguage}
+# Target languages: ${targetLangs.join(', ')}
+
+OPENAI_API_KEY=your-api-key-here
+# OPENAI_BASE_URL=https://api.openai.com/v1  # Optional: for local LLMs (Ollama, etc.)
+# OPENAI_MODEL=gpt-4o-mini                    # Optional: model to use
+`;
+
+    writeFile(envPath, content);
+    return { file: envPath };
+}
+
+/**
+ * Adds translate script to package.json
+ * @param {object} config - Generation config
+ * @returns {{ success: boolean, error?: string }}
+ */
+export async function patchPackageJson(config) {
+    const { cwd } = config;
+    const pkgPath = path.join(cwd, 'package.json');
+
+    if (!fs.existsSync(pkgPath)) {
+        return { success: false, error: 'package.json not found' };
+    }
+
+    try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+
+        // Ensure scripts object exists
+        if (!pkg.scripts) {
+            pkg.scripts = {};
+        }
+
+        // Don't overwrite existing translate script
+        if (pkg.scripts.translate) {
+            return { success: true, error: 'translate script already exists' };
+        }
+
+        // Add translate script
+        pkg.scripts.translate = 'npx i18n-translate';
+
+        // Write back with proper formatting
+        fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+
+        return { success: true, file: pkgPath };
+    } catch (e) {
+        return { success: false, error: `Failed to patch package.json: ${e.message}` };
+    }
+}

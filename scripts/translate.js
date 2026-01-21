@@ -48,6 +48,11 @@ function loadEnvFile() {
                     if (eqIndex > 0) {
                         const key = trimmed.slice(0, eqIndex).trim();
                         let value = trimmed.slice(eqIndex + 1).trim();
+                        // Strip inline comments (everything after # that's not in quotes)
+                        const hashIndex = value.indexOf('#');
+                        if (hashIndex > 0 && !value.slice(0, hashIndex).includes('"') && !value.slice(0, hashIndex).includes("'")) {
+                            value = value.slice(0, hashIndex).trim();
+                        }
                         // Remove quotes if present
                         if ((value.startsWith('"') && value.endsWith('"')) ||
                             (value.startsWith("'") && value.endsWith("'"))) {
@@ -87,6 +92,7 @@ const DEFAULTS = {
 
 /**
  * Detects the locales directory by searching common paths
+ * Supports both bundled (en.json) and namespaced (en/common.json) structures
  */
 function detectLocalesDir() {
     const candidates = [
@@ -104,9 +110,22 @@ function detectLocalesDir() {
         const fullPath = path.resolve(process.cwd(), candidate);
         if (fs.existsSync(fullPath)) {
             try {
-                const files = fs.readdirSync(fullPath).filter(f => f.endsWith('.json'));
-                if (files.length > 0) {
+                const entries = fs.readdirSync(fullPath, { withFileTypes: true });
+
+                // Check for bundled structure: en.json, pl.json (exclude hidden files like .DS_Store)
+                const jsonFiles = entries.filter(e => e.isFile() && e.name.endsWith('.json') && !e.name.startsWith('.'));
+                if (jsonFiles.length > 0) {
                     return fullPath;
+                }
+
+                // Check for namespaced structure: en/, pl/ directories with JSON inside
+                const localeDirs = entries.filter(e => e.isDirectory() && /^[a-z]{2}(-[A-Z]{2})?$/.test(e.name));
+                for (const localeDir of localeDirs) {
+                    const localePath = path.join(fullPath, localeDir.name);
+                    const localeFiles = fs.readdirSync(localePath).filter(f => f.endsWith('.json') && !f.startsWith('.'));
+                    if (localeFiles.length > 0) {
+                        return fullPath;
+                    }
                 }
             } catch {
                 // Continue to next candidate
@@ -361,10 +380,19 @@ function sortKeys(obj) {
 // ============================================================================
 
 /**
- * Makes a request to the OpenAI-compatible API
- * Supports both HTTP and HTTPS for local LLM servers
+ * Delay helper for rate limiting and backoff
  */
-async function postToAI(messages, config) {
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Makes a single request to the OpenAI-compatible API
+ * @param {Array} messages - Chat messages
+ * @param {Object} config - Configuration object
+ * @param {boolean} useJsonFormat - Whether to request JSON response format
+ */
+async function postToAISingle(messages, config, useJsonFormat = true) {
     return new Promise((resolve, reject) => {
         const apiKey = process.env.OPENAI_API_KEY;
         const url = new URL(config.api.url);
@@ -375,12 +403,18 @@ async function postToAI(messages, config) {
             return reject(new Error('Missing OPENAI_API_KEY environment variable'));
         }
 
-        const data = JSON.stringify({
+        const payload = {
             model: config.api.model,
             messages,
             temperature: 0.1
-        });
+        };
 
+        // Add response_format only if requested (some local LLMs don't support it)
+        if (useJsonFormat) {
+            payload.response_format = { type: "json_object" };
+        }
+
+        const data = JSON.stringify(payload);
         const client = url.protocol === 'https:' ? https : http;
 
         const headers = {
@@ -396,7 +430,9 @@ async function postToAI(messages, config) {
             port: url.port || (url.protocol === 'https:' ? 443 : 80),
             path: url.pathname + url.search,
             method: 'POST',
-            headers
+            headers,
+            // Force IPv4 for localhost to avoid ECONNREFUSED ::1 issues with local LLM servers
+            family: (url.hostname === 'localhost' || url.hostname === '127.0.0.1') ? 4 : undefined
         };
 
         const req = client.request(options, (res) => {
@@ -404,7 +440,10 @@ async function postToAI(messages, config) {
             res.on('data', chunk => body += chunk);
             res.on('end', () => {
                 if (res.statusCode >= 400) {
-                    return reject(new Error(`API Error ${res.statusCode}: ${body}`));
+                    const truncatedBody = body.length > 200 ? body.slice(0, 200) + '...' : body;
+                    const error = new Error(`API Error ${res.statusCode}: ${truncatedBody}`);
+                    error.statusCode = res.statusCode;
+                    return reject(error);
                 }
                 try {
                     const json = JSON.parse(body);
@@ -419,7 +458,6 @@ async function postToAI(messages, config) {
             });
         });
 
-        // Longer timeout for LLM requests (local Ollama or busy OpenAI endpoints)
         req.setTimeout(120000, () => {
             req.destroy();
             reject(new Error('Request timeout (120s)'));
@@ -429,6 +467,55 @@ async function postToAI(messages, config) {
         req.write(data);
         req.end();
     });
+}
+
+/**
+ * Makes a request to the API with retry logic and fallback
+ * - Retries up to 3 times with exponential backoff
+ * - Falls back to non-JSON format if response_format causes errors
+ */
+async function postToAI(messages, config) {
+    const maxRetries = 3;
+    const baseDelay = 1000; // 1 second
+    let lastError;
+    let useJsonFormat = true;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await postToAISingle(messages, config, useJsonFormat);
+        } catch (error) {
+            lastError = error;
+
+            // If response_format is not supported (400 error mentioning it), disable and retry immediately
+            if (error.statusCode === 400 && error.message.includes('response_format')) {
+                console.warn('    Warning: response_format not supported, retrying without it...');
+                useJsonFormat = false;
+                continue;
+            }
+
+            // Don't retry on auth errors
+            if (error.statusCode === 401 || error.statusCode === 403) {
+                throw error;
+            }
+
+            // Rate limit - wait longer
+            if (error.statusCode === 429) {
+                const waitTime = baseDelay * Math.pow(2, attempt) * 2; // Double the backoff for rate limits
+                console.warn(`    Rate limited, waiting ${waitTime / 1000}s before retry ${attempt}/${maxRetries}...`);
+                await delay(waitTime);
+                continue;
+            }
+
+            // Other errors - exponential backoff
+            if (attempt < maxRetries) {
+                const waitTime = baseDelay * Math.pow(2, attempt - 1);
+                console.warn(`    Request failed, retrying in ${waitTime / 1000}s (${attempt}/${maxRetries})...`);
+                await delay(waitTime);
+            }
+        }
+    }
+
+    throw lastError;
 }
 
 // ============================================================================
@@ -531,6 +618,67 @@ function getPluralCategories(langCode) {
 // ============================================================================
 
 /**
+ * Sanitizes JSON response from LLM
+ * Removes markdown code blocks, JS comments, and fixes trailing commas
+ */
+function sanitizeJson(str) {
+    // 1. Remove markdown code blocks
+    str = str.trim();
+    if (str.startsWith('```json')) {
+        str = str.slice(7);
+    } else if (str.startsWith('```')) {
+        str = str.slice(3);
+    }
+    if (str.endsWith('```')) {
+        str = str.slice(0, -3);
+    }
+    str = str.trim();
+
+    // 2. Remove single-line JS comments (// ...) outside of strings
+    // Process line by line to safely handle strings
+    const lines = str.split('\n');
+    const cleanedLines = lines.map(line => {
+        let inString = false;
+        let stringChar = null;
+        let result = '';
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const prevChar = i > 0 ? line[i - 1] : '';
+
+            // Track string state
+            if ((char === '"' || char === "'") && prevChar !== '\\') {
+                if (!inString) {
+                    inString = true;
+                    stringChar = char;
+                } else if (char === stringChar) {
+                    inString = false;
+                    stringChar = null;
+                }
+            }
+
+            // Check for // comment outside string
+            if (!inString && char === '/' && line[i + 1] === '/') {
+                break; // Stop here, rest is comment
+            }
+
+            result += char;
+        }
+
+        return result;
+    });
+    str = cleanedLines.join('\n');
+
+    // 3. Remove multi-line JS comments (/* ... */)
+    str = str.replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // 4. Fix trailing commas before } or ]
+    str = str.replace(/,(\s*[}\]])/g, '$1');
+
+    return str.trim();
+}
+
+/**
  * Extracts variables and components from translation strings
  * Returns array of patterns like {{name}}, <b>, </b>, etc.
  */
@@ -608,17 +756,8 @@ Return the translated JSON:`;
 
     const response = await postToAI(messages, config);
 
-    // Clean up response - remove markdown code blocks if present
-    let cleanResponse = response.trim();
-    if (cleanResponse.startsWith('```json')) {
-        cleanResponse = cleanResponse.slice(7);
-    } else if (cleanResponse.startsWith('```')) {
-        cleanResponse = cleanResponse.slice(3);
-    }
-    if (cleanResponse.endsWith('```')) {
-        cleanResponse = cleanResponse.slice(0, -3);
-    }
-    cleanResponse = cleanResponse.trim();
+    // Sanitize response - remove markdown, JS comments, fix trailing commas
+    const cleanResponse = sanitizeJson(response);
 
     try {
         const translated = JSON.parse(cleanResponse);
@@ -745,147 +884,220 @@ async function syncTranslations(config, cliOptions) {
         process.exit(1);
     }
 
+    // 1. Detect structure: Namespaced (en/common.json) vs Bundled (en.json)
+    const sourceLangPath = path.join(localesDir, sourceLang);
+    const isNamespaced = fs.existsSync(sourceLangPath) && fs.lstatSync(sourceLangPath).isDirectory();
+
     console.log(`\nLocales directory: ${localesDir}`);
+    console.log(`Structure: ${isNamespaced ? 'Namespaced' : 'Bundled'}`);
     console.log(`Source language: ${sourceLang}`);
     if (dryRun) console.log('DRY RUN - no files will be modified\n');
 
-    // Read source file
-    const sourceFile = path.join(localesDir, `${sourceLang}.json`);
-    if (!fs.existsSync(sourceFile)) {
-        console.error(`Error: Source file not found: ${sourceFile}`);
-        process.exit(1);
-    }
+    // 2. Build translation tasks
+    const translationTasks = [];
 
-    const sourceData = readLocaleFile(sourceFile);
-    const sourceFlat = flatten(sourceData);
-    const sourceKeys = new Set(Object.keys(sourceFlat));
+    if (isNamespaced) {
+        // Namespaced mode: en/common.json, en/errors.json, etc.
+        const sourceDirPath = path.join(localesDir, sourceLang);
 
-    console.log(`Source file: ${sourceLang}.json (${sourceKeys.size} keys)\n`);
-
-    // Get target files
-    const localeFiles = fs.readdirSync(localesDir)
-        .filter(f => f.endsWith('.json') && f !== `${sourceLang}.json`);
-
-    if (targetLang) {
-        const targetFile = `${targetLang}.json`;
-        if (!localeFiles.includes(targetFile)) {
-            console.error(`Error: Target file not found: ${targetFile}`);
+        if (!fs.existsSync(sourceDirPath)) {
+            console.error(`Error: Source directory not found: ${sourceDirPath}`);
             process.exit(1);
         }
-        localeFiles.length = 0;
-        localeFiles.push(targetFile);
+
+        const namespaces = fs.readdirSync(sourceDirPath).filter(f => f.endsWith('.json') && !f.startsWith('.'));
+
+        if (namespaces.length === 0) {
+            console.error(`Error: No JSON files found in ${sourceDirPath}`);
+            process.exit(1);
+        }
+
+        // Get target language directories
+        const langDirs = fs.readdirSync(localesDir, { withFileTypes: true })
+            .filter(e => e.isDirectory() && e.name !== sourceLang && /^[a-z]{2}(-[A-Z]{2})?$/.test(e.name))
+            .map(e => e.name);
+
+        if (targetLang && !langDirs.includes(targetLang)) {
+            console.error(`Error: Target language directory not found: ${targetLang}`);
+            process.exit(1);
+        }
+
+        for (const ns of namespaces) {
+            const task = {
+                name: ns,
+                sourceFilePath: path.join(sourceDirPath, ns),
+                targets: {}
+            };
+
+            for (const lang of targetLang ? [targetLang] : langDirs) {
+                task.targets[lang] = path.join(localesDir, lang, ns);
+
+                // Ensure target directory exists (for non-dry-run)
+                if (!dryRun) {
+                    const targetDirPath = path.join(localesDir, lang);
+                    if (!fs.existsSync(targetDirPath)) {
+                        fs.mkdirSync(targetDirPath, { recursive: true });
+                    }
+                }
+            }
+
+            translationTasks.push(task);
+        }
+    } else {
+        // Bundled mode: en.json, pl.json
+        const sourceFile = path.join(localesDir, `${sourceLang}.json`);
+
+        if (!fs.existsSync(sourceFile)) {
+            console.error(`Error: Source file not found: ${sourceFile}`);
+            process.exit(1);
+        }
+
+        const task = {
+            name: `${sourceLang}.json`,
+            sourceFilePath: sourceFile,
+            targets: {}
+        };
+
+        const localeFiles = fs.readdirSync(localesDir)
+            .filter(f => f.endsWith('.json') && !f.startsWith('.') && f !== `${sourceLang}.json`)
+            .map(f => f.replace('.json', ''));
+
+        if (targetLang) {
+            if (!localeFiles.includes(targetLang)) {
+                console.error(`Error: Target file not found: ${targetLang}.json`);
+                process.exit(1);
+            }
+            localeFiles.length = 0;
+            localeFiles.push(targetLang);
+        }
+
+        for (const lang of localeFiles) {
+            task.targets[lang] = path.join(localesDir, `${lang}.json`);
+        }
+
+        translationTasks.push(task);
     }
 
-    if (localeFiles.length === 0) {
-        console.log('No target locale files found to translate.');
+    if (translationTasks.length === 0) {
+        console.log('No translation tasks found.');
         return;
     }
 
-    // Process each target file
-    for (const file of localeFiles) {
-        const lang = file.replace('.json', '');
-        const filePath = path.join(localesDir, file);
+    // 3. Process each task
+    for (const task of translationTasks) {
+        console.log(`\n--- Processing: ${task.name} ---`);
 
-        console.log(`\nProcessing: ${file}`);
+        const sourceData = readLocaleFile(task.sourceFilePath);
+        const sourceFlat = flatten(sourceData);
+        const sourceKeys = new Set(Object.keys(sourceFlat));
 
-        // Read target file
-        let targetData = {};
-        if (fs.existsSync(filePath)) {
-            targetData = readLocaleFile(filePath);
-        }
-        const targetFlat = flatten(targetData);
+        console.log(`  Source: ${sourceKeys.size} keys`);
 
-        // Find keys to translate (missing in target)
-        const missingKeys = [];
-        for (const key of sourceKeys) {
-            if (!(key in targetFlat)) {
-                missingKeys.push([key, sourceFlat[key]]);
+        for (const [lang, targetFilePath] of Object.entries(task.targets)) {
+            console.log(`\n  Target [${lang}]: ${path.relative(process.cwd(), targetFilePath)}`);
+
+            // Read target file
+            let targetFlat = {};
+            if (fs.existsSync(targetFilePath)) {
+                targetFlat = flatten(readLocaleFile(targetFilePath));
             }
-        }
 
-        // Find obsolete keys (in target but not in source)
-        const obsoleteKeys = [];
-        for (const key of Object.keys(targetFlat)) {
-            if (!sourceKeys.has(key)) {
-                obsoleteKeys.push(key);
+            // Find missing and obsolete keys
+            const missingKeys = [];
+            for (const key of sourceKeys) {
+                if (!(key in targetFlat)) {
+                    missingKeys.push([key, sourceFlat[key]]);
+                }
             }
-        }
 
-        console.log(`  Missing keys: ${missingKeys.length}`);
-        console.log(`  Obsolete keys: ${obsoleteKeys.length}`);
+            const obsoleteKeys = Object.keys(targetFlat).filter(k => !sourceKeys.has(k));
 
-        if (missingKeys.length === 0 && obsoleteKeys.length === 0) {
-            console.log('  Already in sync!');
-            continue;
-        }
+            console.log(`    Missing: ${missingKeys.length}, Obsolete: ${obsoleteKeys.length}`);
 
-        if (dryRun) {
+            if (missingKeys.length === 0 && obsoleteKeys.length === 0) {
+                console.log('    In sync.');
+                continue;
+            }
+
+            if (dryRun) {
+                if (missingKeys.length > 0) {
+                    console.log('    Would translate:');
+                    for (const [key] of missingKeys.slice(0, 5)) {
+                        console.log(`      - ${key}`);
+                    }
+                    if (missingKeys.length > 5) {
+                        console.log(`      ... and ${missingKeys.length - 5} more`);
+                    }
+                }
+                if (obsoleteKeys.length > 0) {
+                    console.log('    Would remove:');
+                    for (const key of obsoleteKeys.slice(0, 5)) {
+                        console.log(`      - ${key}`);
+                    }
+                    if (obsoleteKeys.length > 5) {
+                        console.log(`      ... and ${obsoleteKeys.length - 5} more`);
+                    }
+                }
+                continue;
+            }
+
+            // Create backup
+            if (!noBackup && fs.existsSync(targetFilePath)) {
+                const backupPath = createBackup(targetFilePath);
+                console.log(`    Backup created: ${path.basename(backupPath)}`);
+            }
+
+            // Remove obsolete keys
+            for (const key of obsoleteKeys) {
+                delete targetFlat[key];
+                if (verbose) {
+                    console.log(`    Removed: ${key}`);
+                }
+            }
+
+            // Translate missing keys in batches
             if (missingKeys.length > 0) {
-                console.log('  Would translate:');
-                for (const [key] of missingKeys.slice(0, 5)) {
-                    console.log(`    - ${key}`);
-                }
-                if (missingKeys.length > 5) {
-                    console.log(`    ... and ${missingKeys.length - 5} more`);
-                }
-            }
-            if (obsoleteKeys.length > 0) {
-                console.log('  Would remove:');
-                for (const key of obsoleteKeys.slice(0, 5)) {
-                    console.log(`    - ${key}`);
-                }
-                if (obsoleteKeys.length > 5) {
-                    console.log(`    ... and ${obsoleteKeys.length - 5} more`);
-                }
-            }
-            continue;
-        }
+                const totalBatches = Math.ceil(missingKeys.length / batchSize);
+                console.log(`    Translating ${missingKeys.length} keys in ${totalBatches} batch(es)...`);
 
-        // Create backup
-        if (!noBackup && fs.existsSync(filePath)) {
-            const backupPath = createBackup(filePath);
-            console.log(`  Backup created: ${path.basename(backupPath)}`);
-        }
-
-        // Remove obsolete keys
-        for (const key of obsoleteKeys) {
-            delete targetFlat[key];
-            if (verbose) {
-                console.log(`  Removed: ${key}`);
-            }
-        }
-
-        // Translate missing keys in batches
-        if (missingKeys.length > 0) {
-            console.log(`  Translating ${missingKeys.length} keys...`);
-
-            for (let i = 0; i < missingKeys.length; i += batchSize) {
-                const batch = missingKeys.slice(i, i + batchSize);
-                try {
-                    const translated = await translateBatch(batch, sourceLang, lang, config, verbose);
-                    Object.assign(targetFlat, translated);
+                for (let i = 0; i < missingKeys.length; i += batchSize) {
+                    const batchNum = Math.floor(i / batchSize) + 1;
+                    const batch = missingKeys.slice(i, i + batchSize);
 
                     if (verbose) {
-                        for (const [key, value] of Object.entries(translated)) {
-                            console.log(`    ${key}: ${value}`);
-                        }
+                        console.log(`    Batch ${batchNum}/${totalBatches} (${batch.length} keys)...`);
                     }
-                } catch (e) {
-                    console.error(`  Error translating batch: ${e.message}`);
-                    // Continue with next batch
+
+                    try {
+                        const translated = await translateBatch(batch, sourceLang, lang, config, verbose);
+                        Object.assign(targetFlat, translated);
+
+                        if (verbose) {
+                            for (const [key, value] of Object.entries(translated)) {
+                                console.log(`      ${key}: ${value}`);
+                            }
+                        }
+                    } catch (e) {
+                        console.error(`    Error translating batch ${batchNum}: ${e.message}`);
+                        // Keys from this batch won't be translated, but we continue with remaining batches
+                    }
+
+                    // Rate limiting: add delay between batches (except after the last one)
+                    if (i + batchSize < missingKeys.length) {
+                        await delay(250); // 250ms delay between batches
+                    }
                 }
             }
-        }
 
-        // Unflatten and optionally sort keys
-        let newData = unflatten(targetFlat);
-        if (shouldSortKeys) {
-            newData = sortKeys(newData);
-        }
+            // Unflatten and sort keys
+            let newData = unflatten(targetFlat);
+            if (shouldSortKeys) {
+                newData = sortKeys(newData);
+            }
 
-        // Write updated file
-        writeLocaleFile(filePath, newData);
-        console.log(`  Updated: ${file}`);
+            writeLocaleFile(targetFilePath, newData);
+            console.log(`    Updated successfully.`);
+        }
     }
 
     console.log('\nTranslation sync complete!');
