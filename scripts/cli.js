@@ -18,7 +18,7 @@
  * Environment Variables:
  *   I18N_YES=1       - Skip prompts and use defaults (for CI)
  *   I18N_LANGS=en,pl - Languages to support (comma-separated)
- *   I18N_TRANSLATE=1 - Setup LLM translation script
+ *   I18N_TRANSLATE=0 - Disable LLM translation setup (enabled by default)
  */
 
 import readline from 'readline';
@@ -445,8 +445,8 @@ async function runInit() {
         // SvelteKit defaults to namespaced structure for better SSR support
         let useNamespaces = framework === 'sveltekit';
         let useMagicHook = framework === 'sveltekit';
-        // I18N_TRANSLATE=1 enables translate setup in non-interactive mode
-        let setupTranslate = process.env.I18N_TRANSLATE === '1';
+        // I18N_TRANSLATE=0 disables translate setup (enabled by default)
+        let setupTranslate = process.env.I18N_TRANSLATE !== '0';
 
         if (!isNonInteractive()) {
             // Languages - with validation and re-prompt loop
@@ -524,13 +524,11 @@ async function runInit() {
                 );
             }
 
-            // LLM Translation setup (optional)
-            if (languages.length > 1) {
-                setupTranslate = await prompt.confirm(
-                    'Setup LLM translation script? (requires OpenAI-compatible API)',
-                    false
-                );
-            }
+            // LLM Translation setup
+            setupTranslate = await prompt.confirm(
+                'Setup LLM translation script? (creates .env.example, adds npm script)',
+                true
+            );
         }
 
         // Step 3: Check for existing files

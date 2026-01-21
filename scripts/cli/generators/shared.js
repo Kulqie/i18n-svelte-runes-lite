@@ -989,8 +989,8 @@ export async function createEnvExample(config) {
 # Docs: https://github.com/kulqie/i18n-svelte-runes-lite#translation
 
 OPENAI_API_KEY=your-api-key-here
-# OPENAI_BASE_URL=https://api.openai.com/v1  # Optional: for local LLMs (Ollama, etc.)
-# OPENAI_MODEL=gpt-4o-mini                    # Optional: model to use
+# OPENAI_BASE_URL=https://api.openai.com/v1  # Base URL (without /chat/completions)
+# OPENAI_MODEL=gpt-4o-mini                    # Model to use
 `;
         fs.appendFileSync(envPath, appendContent, 'utf8');
         return { file: envPath };
@@ -1008,8 +1008,8 @@ OPENAI_API_KEY=your-api-key-here
 # Target languages: ${targetLangs.join(', ')}
 
 OPENAI_API_KEY=your-api-key-here
-# OPENAI_BASE_URL=https://api.openai.com/v1  # Optional: for local LLMs (Ollama, etc.)
-# OPENAI_MODEL=gpt-4o-mini                    # Optional: model to use
+# OPENAI_BASE_URL=https://api.openai.com/v1  # Base URL (without /chat/completions)
+# OPENAI_MODEL=gpt-4o-mini                    # Model to use
 `;
 
     writeFile(envPath, content);

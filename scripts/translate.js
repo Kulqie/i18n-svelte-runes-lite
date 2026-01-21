@@ -147,7 +147,14 @@ function loadConfig(cliOptions = {}) {
 
     // Apply environment variables
     if (process.env.OPENAI_BASE_URL) {
-        config.api.url = process.env.OPENAI_BASE_URL;
+        let baseUrl = process.env.OPENAI_BASE_URL.trim();
+        // Normalize: if user provides base URL without /chat/completions, add it
+        // Common patterns: /v1, /v1/, /api/v1, /api/v1/
+        if (!baseUrl.includes('/chat/completions')) {
+            baseUrl = baseUrl.replace(/\/+$/, ''); // Remove trailing slashes
+            baseUrl += '/chat/completions';
+        }
+        config.api.url = baseUrl;
     }
     if (process.env.OPENAI_MODEL) {
         config.api.model = process.env.OPENAI_MODEL;
@@ -913,13 +920,34 @@ async function syncTranslations(config, cliOptions) {
         }
 
         // Get target language directories
-        const langDirs = fs.readdirSync(localesDir, { withFileTypes: true })
+        let langDirs = fs.readdirSync(localesDir, { withFileTypes: true })
             .filter(e => e.isDirectory() && e.name !== sourceLang && /^[a-z]{2}(-[A-Z]{2})?$/.test(e.name))
             .map(e => e.name);
 
+        // If --target is specified but directory doesn't exist, create it
         if (targetLang && !langDirs.includes(targetLang)) {
-            console.error(`Error: Target language directory not found: ${targetLang}`);
-            process.exit(1);
+            if (/^[a-z]{2}(-[A-Z]{2})?$/.test(targetLang)) {
+                const newLangDir = path.join(localesDir, targetLang);
+                if (!dryRun) {
+                    fs.mkdirSync(newLangDir, { recursive: true });
+                    console.log(`Created new language directory: ${targetLang}/`);
+                } else {
+                    console.log(`Would create new language directory: ${targetLang}/`);
+                }
+                langDirs.push(targetLang);
+            } else {
+                console.error(`Error: Invalid language code format: ${targetLang}`);
+                console.error('Expected format: xx or xx-XX (e.g., en, pl, pt-BR)');
+                process.exit(1);
+            }
+        }
+
+        // If no target languages found and none specified, show helpful message
+        if (langDirs.length === 0 && !targetLang) {
+            console.log('\nNo target language directories found.');
+            console.log('To add a new language, use: i18n-translate --target <lang>');
+            console.log('Example: i18n-translate --target pl');
+            return;
         }
 
         for (const ns of namespaces) {
@@ -958,17 +986,32 @@ async function syncTranslations(config, cliOptions) {
             targets: {}
         };
 
-        const localeFiles = fs.readdirSync(localesDir)
+        let localeFiles = fs.readdirSync(localesDir)
             .filter(f => f.endsWith('.json') && !f.startsWith('.') && f !== `${sourceLang}.json`)
             .map(f => f.replace('.json', ''));
 
+        // If --target is specified but file doesn't exist, we'll create it
         if (targetLang) {
             if (!localeFiles.includes(targetLang)) {
-                console.error(`Error: Target file not found: ${targetLang}.json`);
-                process.exit(1);
+                if (/^[a-z]{2}(-[A-Z]{2})?$/.test(targetLang)) {
+                    console.log(`Will create new locale file: ${targetLang}.json`);
+                    localeFiles.push(targetLang);
+                } else {
+                    console.error(`Error: Invalid language code format: ${targetLang}`);
+                    console.error('Expected format: xx or xx-XX (e.g., en, pl, pt-BR)');
+                    process.exit(1);
+                }
             }
-            localeFiles.length = 0;
-            localeFiles.push(targetLang);
+            // Only process the specified target
+            localeFiles = [targetLang];
+        }
+
+        // If no target languages found and none specified, show helpful message
+        if (localeFiles.length === 0 && !targetLang) {
+            console.log('\nNo target locale files found.');
+            console.log('To add a new language, use: i18n-translate --target <lang>');
+            console.log('Example: i18n-translate --target pl');
+            return;
         }
 
         for (const lang of localeFiles) {
