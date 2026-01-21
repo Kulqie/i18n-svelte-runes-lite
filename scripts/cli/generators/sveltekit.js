@@ -584,10 +584,12 @@ import { loadLocale } from '${i18nImportPath}';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
     // Load translations for the detected locale (namespaced mode)
-    const translations = await loadLocale(locals.locale);
+    const namespaces = ['common'];
+    const translations = await loadLocale(locals.locale, namespaces);
     return {
         locale: locals.locale,
-        translations: { [locals.locale]: translations }
+        translations: { [locals.locale]: translations },
+        loadedNamespaces: namespaces
     };
 };
 `
@@ -595,10 +597,12 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 
 export const load = async ({ locals }) => {
     // Load translations for the detected locale (namespaced mode)
-    const translations = await loadLocale(locals.locale);
+    const namespaces = ['common'];
+    const translations = await loadLocale(locals.locale, namespaces);
     return {
         locale: locals.locale,
-        translations: { [locals.locale]: translations }
+        translations: { [locals.locale]: translations },
+        loadedNamespaces: namespaces
     };
 };
 `;
@@ -667,11 +671,19 @@ function generateLayoutSvelte(config) {
     import { defaultLocale, loadLocale } from '${i18nImportPath}';
     let { data, children } = $props();
 
-    // For namespaced mode, translations are loaded in +layout.server.ts
-    // and passed via data.translations
+    // For namespaced mode:
+    // - SSR: translations are loaded in +layout.server.ts and passed via data.translations
+    // - Client: onLocaleChange hook loads translations dynamically when locale changes
     setI18n({
         translations: data.translations ?? {},
-        initialLocale: data.locale ?? defaultLocale
+        initialLocale: data.locale ?? defaultLocale,
+        ssrLoadedNamespaces: data.loadedNamespaces
+            ? { [data.locale]: data.loadedNamespaces }
+            : undefined,
+        onLocaleChange: async (newLocale) => {
+            const namespaces = data.loadedNamespaces ?? ['common'];
+            return await loadLocale(newLocale, namespaces);
+        }
     });
   </script>
 
@@ -701,19 +713,29 @@ function generateLayoutSvelte(config) {
 
     let content;
     if (useNamespaces) {
-        // Namespaced mode: translations loaded async, passed via page data
+        // Namespaced mode: translations loaded async, uses onLocaleChange hook for dynamic loading
         content = `<script${scriptLang}>
     import { setI18n } from 'i18n-svelte-runes-lite';
-    import { defaultLocale, supportedLocales } from '${i18nImportPath}';
+    import { defaultLocale, loadLocale } from '${i18nImportPath}';
 
     let { data, children } = $props();
 
     // Initialize i18n context for the component tree
-    // For namespaced mode, translations are loaded in +layout.server.ts
-    // and passed via data.translations (see loadLocale helper)
+    // For namespaced mode:
+    // - SSR: translations are loaded in +layout.server.ts and passed via data.translations
+    // - Client: onLocaleChange hook loads translations dynamically when locale changes
     setI18n({
         translations: data.translations ?? {},
-        initialLocale: data.locale ?? defaultLocale
+        initialLocale: data.locale ?? defaultLocale,
+        // SSR tracking - prevents isNamespaceLoaded('common') returning false on hydration
+        ssrLoadedNamespaces: data.loadedNamespaces
+            ? { [data.locale]: data.loadedNamespaces }
+            : undefined,
+        // Hook called when locale changes - loads translations dynamically
+        onLocaleChange: async (newLocale) => {
+            const namespaces = data.loadedNamespaces ?? ['common'];
+            return await loadLocale(newLocale, namespaces);
+        }
     });
 </script>
 

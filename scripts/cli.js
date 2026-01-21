@@ -495,14 +495,16 @@ async function runInit() {
                 'src/lib/i18n/locales'
             );
 
-            // Structure
+            // Structure (SvelteKit defaults to namespaced for SSR benefits)
+            const structureDefaultIndex = framework === 'sveltekit' ? 1 : 0;
+
             const structureChoice = await prompt.select(
                 'Translation file structure:',
                 [
                     { value: 'bundled', label: 'Bundled', hint: 'en.json, pl.json' },
-                    { value: 'namespaced', label: 'Namespaced', hint: 'en/common.json, en/auth.json' }
+                    { value: 'namespaced', label: 'Namespaced', hint: 'en/common.json, en/auth.json (recommended for SSR)' }
                 ],
-                0
+                structureDefaultIndex
             );
             useNamespaces = structureChoice === 'namespaced';
 

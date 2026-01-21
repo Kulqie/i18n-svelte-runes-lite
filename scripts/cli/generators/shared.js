@@ -848,37 +848,63 @@ function generateNamespacedIndex(config) {
     const { languages, defaultLanguage, isTypeScript, framework } = config;
 
     if (framework === 'sveltekit') {
-        return `// Namespaced locale loader
+        return `// Namespaced locale loader with caching
 export const defaultLocale = '${defaultLanguage}';
 export const supportedLocales = [${languages.map(l => `'${l}'`).join(', ')}]${isTypeScript ? ' as const' : ''};
 
-export type Locale = typeof supportedLocales[number];
+${isTypeScript ? 'export type Locale = typeof supportedLocales[number];' : ''}
+
+// Cache to avoid re-fetching (client-side only to prevent SSR state pollution)
+const namespaceCache${isTypeScript ? ': Map<string, Record<string, unknown>>' : ''} = new Map();
+const isServer = typeof window === 'undefined';
 
 /**
- * Load a namespace for a specific locale
+ * Load namespace with fallback chain: locale -> defaultLocale -> empty
+ * Note: On server, always does fresh import to avoid cross-request state pollution
  */
-export async function loadNamespace(locale${isTypeScript ? ': Locale' : ''}, namespace${isTypeScript ? ': string' : ''}) {
+export async function loadNamespace(locale${isTypeScript ? ': Locale' : ''}, namespace${isTypeScript ? ': string' : ''})${isTypeScript ? ': Promise<Record<string, unknown>>' : ''} {
+    const cacheKey = \`\${locale}:\${namespace}\`;
+
+    // Use cache only on client side
+    if (!isServer && namespaceCache.has(cacheKey)) {
+        return namespaceCache.get(cacheKey)${isTypeScript ? '!' : ''};
+    }
+
     try {
         const module = await import(/* @vite-ignore */ \`./locales/\${locale}/\${namespace}.json\`);
-        return module.default;
+        const data = module.default ?? module;
+
+        // Cache only on client
+        if (!isServer) {
+            namespaceCache.set(cacheKey, data);
+        }
+        return data;
     } catch {
-        // Fallback to default locale
         if (locale !== defaultLocale) {
             return loadNamespace(defaultLocale, namespace);
         }
+        console.warn(\`[i18n] Namespace '\${namespace}' not found\`);
         return {};
     }
 }
 
 /**
- * Load all namespaces for a locale
+ * Load multiple namespaces in parallel
  */
-export async function loadLocale(locale${isTypeScript ? ': Locale' : ''}, namespaces${isTypeScript ? ': string[]' : ''} = ['common']) {
-    const translations${isTypeScript ? ': Record<string, unknown>' : ''} = {};
-    for (const ns of namespaces) {
-        translations[ns] = await loadNamespace(locale, ns);
+export async function loadLocale(locale${isTypeScript ? ': Locale' : ''}, namespaces${isTypeScript ? ': string[]' : ''} = ['common'])${isTypeScript ? ': Promise<Record<string, unknown>>' : ''} {
+    const results = await Promise.all(
+        namespaces.map(ns => loadNamespace(locale, ns))
+    );
+    return Object.assign({}, ...results);
+}
+
+/**
+ * Preload namespace (non-blocking, for prefetching, client-only)
+ */
+export function preloadNamespace(locale${isTypeScript ? ': Locale' : ''}, namespace${isTypeScript ? ': string' : ''})${isTypeScript ? ': void' : ''} {
+    if (!isServer) {
+        loadNamespace(locale, namespace).catch(() => {});
     }
-    return translations;
 }
 `;
     }

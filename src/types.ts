@@ -313,6 +313,31 @@ export interface I18nConfig<Schema extends object> {
     reloadOnChange?: boolean;
 
     /**
+     * Called when locale changes. Return translations for the new locale.
+     * Useful for dynamic loading in SvelteKit namespaced mode.
+     *
+     * This hook is called BEFORE the locale is actually changed, allowing
+     * you to load translations asynchronously. If the hook returns translations,
+     * they are merged into the translations store.
+     *
+     * Race condition safe: if multiple locale changes happen quickly,
+     * only the latest one takes effect.
+     *
+     * @example
+     * ```ts
+     * setI18n({
+     *     translations: data.translations ?? {},
+     *     initialLocale: data.locale ?? defaultLocale,
+     *     onLocaleChange: async (newLocale) => {
+     *         const namespaces = ['common'];
+     *         return await loadLocale(newLocale, namespaces);
+     *     }
+     * });
+     * ```
+     */
+    onLocaleChange?: (newLocale: string, oldLocale: string) => Promise<Schema | void>;
+
+    /**
      * Override automatic environment detection.
      * - 'sveltekit': Force bridge strategy (assumes server hooks available)
      * - 'wails': Force localStorage strategy

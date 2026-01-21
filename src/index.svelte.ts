@@ -805,7 +805,10 @@ export function createI18n<Schema extends object>(config: I18nConfig<Schema> | I
      */
     async function setLocale(newLocale: string, lazyLoad: boolean = true): Promise<void> {
         const thisRequestId = ++localeRequestId;
+        const oldLocale = currentLocale;
 
+        // --- STANDARD LOADERS PATH ---
+        // If translations for newLocale are not available and we have a standard loader, use it
         if (!translations[newLocale]) {
             if (lazyLoad && loaders[newLocale]) {
                 try {
@@ -815,13 +818,63 @@ export function createI18n<Schema extends object>(config: I18nConfig<Schema> | I
                     // Don't change locale if load failed
                     return;
                 }
+
+                // Race condition check after async operation
+                if (thisRequestId !== localeRequestId) {
+                    return; // A newer request has been made - abort this one
+                }
+            } else if (config.onLocaleChange) {
+                // --- ON_LOCALE_CHANGE HOOK PATH ---
+                // No standard loaders, but onLocaleChange hook is available
+                // This is the primary path for SvelteKit namespaced mode
+                try {
+                    const newTranslations = await config.onLocaleChange(newLocale, oldLocale);
+
+                    // Race condition check after async hook call
+                    if (thisRequestId !== localeRequestId) {
+                        return; // A newer request has been made - abort this one
+                    }
+
+                    if (newTranslations) {
+                        // Merge new translations into the store
+                        translations[newLocale] = {
+                            ...(translations[newLocale] || {}),
+                            ...newTranslations
+                        };
+                    }
+                } catch (error) {
+                    console.error(`[i18n-svelte-runes-lite] onLocaleChange hook failed for locale '${newLocale}':`, error);
+                    return;
+                }
             } else {
                 console.warn(`[i18n-svelte-runes-lite] Locale '${newLocale}' not found in translations.`);
                 return;
             }
+        } else if (config.onLocaleChange) {
+            // --- TRANSLATIONS EXIST BUT CALL HOOK ANYWAY ---
+            // Useful for apps that want to load additional namespaces on locale change
+            try {
+                const newTranslations = await config.onLocaleChange(newLocale, oldLocale);
+
+                // Race condition check after async hook call
+                if (thisRequestId !== localeRequestId) {
+                    return; // A newer request has been made - abort this one
+                }
+
+                if (newTranslations) {
+                    // Merge new translations into existing ones
+                    translations[newLocale] = {
+                        ...(translations[newLocale] || {}),
+                        ...newTranslations
+                    };
+                }
+            } catch (error) {
+                console.error(`[i18n-svelte-runes-lite] onLocaleChange hook failed for locale '${newLocale}':`, error);
+                // Don't return - translations already exist, so we can still switch
+            }
         }
 
-        // Check if this is still the most recent request (race condition fix)
+        // Final race condition check before setting the locale
         if (thisRequestId !== localeRequestId) {
             return; // A newer request has been made - abort this one
         }

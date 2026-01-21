@@ -103,6 +103,9 @@ const i18n = createI18n<Schema>({
     reloadOnChange?: boolean,      // Reload after bridge persistence
     environment?: 'auto' | 'sveltekit' | 'wails' | 'spa',
 
+    // Dynamic locale loading hook (great for namespaced mode)
+    onLocaleChange?: (newLocale, oldLocale) => Promise<Schema | void>,
+
     // Namespace options (for splitting by feature)
     namespaceLoaders?: Record<string, NamespaceLoaders>,
     defaultNamespace?: string,              // Default: 'common'
@@ -229,6 +232,8 @@ The CLI will:
 - Generate locale files with sample translations
 - Create the i18n configuration file
 - Update your Vite config if needed
+
+> **SvelteKit Default**: For SvelteKit projects, the CLI now defaults to **namespaced structure** (`en/common.json` instead of `en.json`). This provides better SSR support with client-side caching, parallel namespace loading, and the `onLocaleChange` hook for dynamic locale switching.
 
 ### Non-Interactive Mode
 

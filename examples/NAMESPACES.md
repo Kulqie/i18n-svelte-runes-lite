@@ -2,6 +2,8 @@
 
 Namespaces allow you to split translations by **feature or route** rather than loading everything at once. This is ideal for large applications where different pages use different translation keys.
 
+> **Default for SvelteKit**: When running `npx i18n-setup`, namespaced structure is now the default for SvelteKit projects. This provides better SSR support, parallel loading, and client-side caching out of the box.
+
 ## When to Use Namespaces?
 
 ✅ **Use namespaces when:**
@@ -233,6 +235,123 @@ export const load = async ({ locals }) => {
    - `dashboard` namespace is still in `loadedNamespaces` (cached)
    - Everything works instantly
 
+## Dynamic Locale Loading with `onLocaleChange` Hook
+
+When using namespaced translations in SvelteKit, you often want to dynamically load translations when the user switches languages. The `onLocaleChange` hook provides a clean way to do this without manually configuring `namespaceLoaders`.
+
+### The Problem with Manual Namespace Loaders
+
+Setting up `namespaceLoaders` for every locale and namespace is verbose:
+
+```typescript
+// Verbose manual configuration
+const namespaceLoaders = {
+    en: {
+        common: () => import('./locales/en/common.json'),
+        dashboard: () => import('./locales/en/dashboard.json'),
+    },
+    pl: {
+        common: () => import('./locales/pl/common.json'),
+        dashboard: () => import('./locales/pl/dashboard.json'),
+    },
+    de: {
+        common: () => import('./locales/de/common.json'),
+        dashboard: () => import('./locales/de/dashboard.json'),
+    }
+};
+```
+
+### The Solution: `onLocaleChange` Hook
+
+The `onLocaleChange` hook is called when `setLocale()` is invoked. It allows you to load translations dynamically and return them to be merged into the store:
+
+```svelte
+<!-- +layout.svelte -->
+<script lang="ts">
+    import { setI18n } from 'i18n-svelte-runes-lite/context';
+    import { defaultLocale, loadLocale } from '$lib/i18n/locales';
+
+    let { data, children } = $props();
+
+    setI18n({
+        translations: data.translations ?? {},
+        initialLocale: data.locale ?? defaultLocale,
+        // Track SSR-loaded namespaces for hydration
+        ssrLoadedNamespaces: data.loadedNamespaces
+            ? { [data.locale]: data.loadedNamespaces }
+            : undefined,
+        // Dynamically load translations when locale changes
+        onLocaleChange: async (newLocale) => {
+            const namespaces = data.loadedNamespaces ?? ['common'];
+            return await loadLocale(newLocale, namespaces);
+        }
+    });
+</script>
+
+{@render children()}
+```
+
+### Generated `loadLocale` Helper
+
+When you run `npx i18n-setup` for SvelteKit with namespaced structure (now the default), the CLI generates a `locales.ts` file with helper functions:
+
+```typescript
+// Generated in src/lib/i18n/locales.ts
+export const defaultLocale = 'en';
+export const supportedLocales = ['en', 'pl'] as const;
+
+// Client-side cache to avoid re-fetching
+const namespaceCache = new Map();
+
+export async function loadNamespace(locale, namespace) {
+    // Handles caching on client, fallback to defaultLocale, etc.
+}
+
+export async function loadLocale(locale, namespaces = ['common']) {
+    // Loads multiple namespaces in parallel
+    const results = await Promise.all(
+        namespaces.map(ns => loadNamespace(locale, ns))
+    );
+    return Object.assign({}, ...results);
+}
+
+export function preloadNamespace(locale, namespace) {
+    // Non-blocking prefetch
+}
+```
+
+### How It Works
+
+1. **SSR**: Server loads translations in `+layout.server.ts` and passes them to client
+2. **Initial hydration**: Client receives translations via `data.translations`
+3. **Locale change**: User clicks language switcher, `setLocale('pl')` is called
+4. **Hook invoked**: `onLocaleChange('pl', 'en')` is called
+5. **Dynamic load**: Hook calls `loadLocale('pl', ['common'])` to fetch translations
+6. **Merge**: Returned translations are merged into the store
+7. **Update**: UI updates with new translations
+
+### Race Condition Protection
+
+The `onLocaleChange` hook is race-condition safe. If the user rapidly switches languages (en → pl → de), only the last locale change takes effect:
+
+```
+Click "Polski"  → onLocaleChange('pl', 'en') starts loading...
+Click "Deutsch" → onLocaleChange('de', 'pl') starts loading...
+...
+'de' response arrives → locale set to 'de' ✅
+'pl' response arrives → ignored (outdated request) ✅
+```
+
+### Caching Benefits
+
+The generated `loadLocale` function includes client-side caching:
+
+- First load of `en/common.json` → network fetch
+- Switch to `pl` → network fetch for `pl/common.json`
+- Switch back to `en` → served from cache (instant!)
+
+This is especially useful for language switchers where users may toggle between languages.
+
 ## Advanced Patterns
 
 ### Vite Glob Pattern for Dynamic Loaders
@@ -320,6 +439,9 @@ interface I18nConfigWithNamespaces {
 
     // Pre-mark namespaces as loaded from SSR
     ssrLoadedNamespaces?: Record<string, string[]>;
+
+    // Hook called when locale changes - return new translations
+    onLocaleChange?: (newLocale: string, oldLocale: string) => Promise<Schema | void>;
 }
 ```
 
