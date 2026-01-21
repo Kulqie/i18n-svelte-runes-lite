@@ -437,7 +437,8 @@ async function runInit() {
         // Step 2: Get configuration
         let languages = ['en'];
         let localesPath = 'src/lib/i18n/locales';
-        let useNamespaces = false;
+        // SvelteKit defaults to namespaced structure for better SSR support
+        let useNamespaces = framework === 'sveltekit';
         let useMagicHook = framework === 'sveltekit';
 
         if (!isNonInteractive()) {

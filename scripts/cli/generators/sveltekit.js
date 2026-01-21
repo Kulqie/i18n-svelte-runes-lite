@@ -221,9 +221,9 @@ function generateAppDts(config) {
                 const indentMatch = namespaceContent.match(/\n([ \t]+)/);
                 const indent = indentMatch ? indentMatch[1] : '        ';
 
-                const localsInterface = `\n${indent}interface Locals {\n${indent}    locale: ${localeTypeName};\n${indent}}\n    `;
+                const localsInterface = `\n${indent}interface Locals {\n${indent}    locale: ${localeTypeName};\n${indent}}`;
 
-                content = `${localeType}\n\n${beforeClose}${localsInterface}${afterClose}`;
+                content = `${localeType}\n\n${beforeClose}${localsInterface}\n${afterClose}`;
 
                 writeFile(appDtsPath, content);
                 return { file: 'src/app.d.ts' };
@@ -630,6 +630,122 @@ export const load: LayoutServerLoad = ({ locals }) => {
 }
 
 /**
+ * Attempts to auto-patch an existing +layout.svelte file
+ * @param {string} content - Current file content
+ * @param {string} i18nImportPath - Import path for locales
+ * @param {boolean} useNamespaces - Whether to use namespaced mode
+ * @returns {{ success: boolean, content?: string }}
+ */
+function patchLayoutSvelte(content, i18nImportPath, useNamespaces) {
+    // Strategy: Find script tag, add imports, modify $props(), add setI18n()
+
+    // Find the opening <script> tag
+    const scriptMatch = content.match(/<script(\s+[^>]*)?>[\s\S]*?<\/script>/);
+    if (!scriptMatch) {
+        return { success: false };
+    }
+
+    const scriptStart = content.indexOf(scriptMatch[0]);
+    const scriptEnd = scriptStart + scriptMatch[0].length;
+    let scriptContent = scriptMatch[0];
+
+    // Extract the script tag attributes and body
+    const openTagMatch = scriptContent.match(/^<script([^>]*)>/);
+    const scriptAttrs = openTagMatch ? openTagMatch[1] : '';
+    const scriptBodyStart = scriptContent.indexOf('>') + 1;
+    const scriptBodyEnd = scriptContent.lastIndexOf('</script>');
+    let scriptBody = scriptContent.slice(scriptBodyStart, scriptBodyEnd);
+
+    // Build the i18n imports based on mode
+    const i18nImports = useNamespaces
+        ? `import { setI18n } from 'i18n-svelte-runes-lite/context';
+    import { defaultLocale, loadLocale } from '${i18nImportPath}';`
+        : `import { setI18n } from 'i18n-svelte-runes-lite/context';
+    import { locales, defaultLocale } from '${i18nImportPath}';`;
+
+    // Build the setI18n() call based on mode
+    const setI18nCall = useNamespaces
+        ? `
+    // We intentionally capture initial SSR values - they don't change during component lifecycle
+    // svelte-ignore state_referenced_locally
+    const initialLocale = data.locale ?? defaultLocale;
+    // svelte-ignore state_referenced_locally
+    const initialTranslations = data.translations ?? {};
+    // svelte-ignore state_referenced_locally
+    const initialLoadedNamespaces = data.loadedNamespaces ?? ['common'];
+
+    // Initialize i18n context for the component tree
+    setI18n({
+        translations: initialTranslations,
+        initialLocale: initialLocale,
+        ssrLoadedNamespaces: initialLoadedNamespaces.length > 0
+            ? { [initialLocale]: initialLoadedNamespaces }
+            : undefined,
+        onLocaleChange: async (newLocale) => {
+            return await loadLocale(newLocale, initialLoadedNamespaces);
+        }
+    });`
+        : `
+    // Initialize i18n context for the component tree
+    setI18n({
+        translations: locales,
+        initialLocale: data.locale ?? defaultLocale
+    });`;
+
+    // Find all import statements to add our imports after them
+    const lastImportMatch = scriptBody.match(/import\s+.*?(?:from\s+['"][^'"]+['"]|['"][^'"]+['"])\s*;?\s*\n/g);
+    let insertImportsAt = 0;
+    if (lastImportMatch) {
+        // Find position after last import
+        let lastImportEnd = 0;
+        for (const imp of lastImportMatch) {
+            const idx = scriptBody.indexOf(imp, lastImportEnd);
+            if (idx !== -1) {
+                lastImportEnd = idx + imp.length;
+            }
+        }
+        insertImportsAt = lastImportEnd;
+    } else {
+        // No imports found, insert at start of script body
+        insertImportsAt = scriptBody.match(/^\s*/) ? scriptBody.match(/^\s*/)[0].length : 0;
+    }
+
+    // Check if $props() exists and modify it to include 'data'
+    const propsMatch = scriptBody.match(/let\s+\{\s*([^}]*)\s*\}\s*(?::\s*\{[^}]*\}\s*)?=\s*\$props\(\)/);
+    if (propsMatch) {
+        const propsContent = propsMatch[1];
+        // Check if 'data' is already in props
+        if (!propsContent.includes('data')) {
+            // Add 'data' to the props
+            const newPropsContent = propsContent.trim() ? `data, ${propsContent}` : 'data';
+            const newPropsLine = propsMatch[0].replace(propsContent, newPropsContent);
+            scriptBody = scriptBody.replace(propsMatch[0], newPropsLine);
+        }
+    } else {
+        // No $props() found - this is unusual for a layout, might need manual intervention
+        // Try to add let { data, children } = $props(); after imports
+        const propsLine = '\n    let { data, children } = $props();\n';
+        scriptBody = scriptBody.slice(0, insertImportsAt) + propsLine + scriptBody.slice(insertImportsAt);
+        insertImportsAt += propsLine.length;
+    }
+
+    // Insert imports after existing imports (recalculate position after props modification)
+    const importInsert = '\n    ' + i18nImports + '\n';
+    scriptBody = scriptBody.slice(0, insertImportsAt) + importInsert + scriptBody.slice(insertImportsAt);
+
+    // Add setI18n() call at the end of script body (before closing </script>)
+    scriptBody = scriptBody.trimEnd() + setI18nCall + '\n';
+
+    // Rebuild the script tag
+    const newScript = `<script${scriptAttrs}>${scriptBody}</script>`;
+
+    // Replace in original content
+    const newContent = content.slice(0, scriptStart) + newScript + content.slice(scriptEnd);
+
+    return { success: true, content: newContent };
+}
+
+/**
  * Generates or patches +layout.svelte
  * Uses setI18n() context pattern (NOT I18nProvider - that doesn't exist)
  *
@@ -661,28 +777,37 @@ function generateLayoutSvelte(config) {
 
         createBackup(layoutPath);
 
-        // Try to patch - add setI18n call
-        // This is complex, so we'll provide a template and warn
-        // Template differs based on bundled vs namespaced mode
+        // Try to auto-patch the existing layout
+        const patchResult = patchLayoutSvelte(content, i18nImportPath, useNamespaces);
+        if (patchResult.success) {
+            writeFile(layoutPath, patchResult.content);
+            return { file: 'src/routes/+layout.svelte' };
+        }
+
+        // Auto-patch failed, provide manual instructions
         const manualInstructions = useNamespaces
             ? `Please manually update +layout.svelte. Add:
   <script>
-    import { setI18n } from 'i18n-svelte-runes-lite';
+    import { setI18n } from 'i18n-svelte-runes-lite/context';
     import { defaultLocale, loadLocale } from '${i18nImportPath}';
     let { data, children } = $props();
 
-    // For namespaced mode:
-    // - SSR: translations are loaded in +layout.server.ts and passed via data.translations
-    // - Client: onLocaleChange hook loads translations dynamically when locale changes
+    // We intentionally capture initial SSR values
+    // svelte-ignore state_referenced_locally
+    const initialLocale = data.locale ?? defaultLocale;
+    // svelte-ignore state_referenced_locally
+    const initialTranslations = data.translations ?? {};
+    // svelte-ignore state_referenced_locally
+    const initialLoadedNamespaces = data.loadedNamespaces ?? ['common'];
+
     setI18n({
-        translations: data.translations ?? {},
-        initialLocale: data.locale ?? defaultLocale,
-        ssrLoadedNamespaces: data.loadedNamespaces
-            ? { [data.locale]: data.loadedNamespaces }
+        translations: initialTranslations,
+        initialLocale: initialLocale,
+        ssrLoadedNamespaces: initialLoadedNamespaces.length > 0
+            ? { [initialLocale]: initialLoadedNamespaces }
             : undefined,
         onLocaleChange: async (newLocale) => {
-            const namespaces = data.loadedNamespaces ?? ['common'];
-            return await loadLocale(newLocale, namespaces);
+            return await loadLocale(newLocale, initialLoadedNamespaces);
         }
     });
   </script>
@@ -715,26 +840,28 @@ function generateLayoutSvelte(config) {
     if (useNamespaces) {
         // Namespaced mode: translations loaded async, uses onLocaleChange hook for dynamic loading
         content = `<script${scriptLang}>
-    import { setI18n } from 'i18n-svelte-runes-lite';
+    import { setI18n } from 'i18n-svelte-runes-lite/context';
     import { defaultLocale, loadLocale } from '${i18nImportPath}';
 
     let { data, children } = $props();
 
+    // We intentionally capture initial SSR values - they don't change during component lifecycle
+    // svelte-ignore state_referenced_locally
+    const initialLocale = data.locale ?? defaultLocale;
+    // svelte-ignore state_referenced_locally
+    const initialTranslations = data.translations ?? {};
+    // svelte-ignore state_referenced_locally
+    const initialLoadedNamespaces = data.loadedNamespaces ?? ['common'];
+
     // Initialize i18n context for the component tree
-    // For namespaced mode:
-    // - SSR: translations are loaded in +layout.server.ts and passed via data.translations
-    // - Client: onLocaleChange hook loads translations dynamically when locale changes
     setI18n({
-        translations: data.translations ?? {},
-        initialLocale: data.locale ?? defaultLocale,
-        // SSR tracking - prevents isNamespaceLoaded('common') returning false on hydration
-        ssrLoadedNamespaces: data.loadedNamespaces
-            ? { [data.locale]: data.loadedNamespaces }
+        translations: initialTranslations,
+        initialLocale: initialLocale,
+        ssrLoadedNamespaces: initialLoadedNamespaces.length > 0
+            ? { [initialLocale]: initialLoadedNamespaces }
             : undefined,
-        // Hook called when locale changes - loads translations dynamically
         onLocaleChange: async (newLocale) => {
-            const namespaces = data.loadedNamespaces ?? ['common'];
-            return await loadLocale(newLocale, namespaces);
+            return await loadLocale(newLocale, initialLoadedNamespaces);
         }
     });
 </script>

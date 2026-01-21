@@ -508,6 +508,19 @@ function patchViteContent(content, needsOptimizeDeps = true, needsSsr = true) {
         }
     }
 
+    // Strategy 6: Variable assignment pattern (const/let/var config = { ... })
+    // Matches: const config: UserConfig = { ... }
+    // or: const config = { ... }
+    // where the variable is later exported (export default config)
+    const varAssignResult = findNonCommentedMatch(content, '(?:const|let|var)\\s+(\\w+)(?:\\s*:\\s*[^=]+)?\\s*=\\s*\\{');
+    if (varAssignResult) {
+        const braceIndex = content.indexOf('{', varAssignResult.index);
+        const result = insertAfterBrace(content, braceIndex);
+        if (isBalanced(result)) {
+            return result;
+        }
+    }
+
     // Could not patch - return unchanged content
     return content;
 }
