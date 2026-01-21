@@ -200,9 +200,16 @@ export default defineConfig({
 
     return `import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vite';
+import path from 'path';
 
 export default defineConfig({
     plugins: [svelte()],
+    // $lib alias for SvelteKit-like imports
+    resolve: {
+        alias: {
+            $lib: path.resolve('./src/lib')
+        }
+    },
     // i18n-svelte-runes-lite configuration
     optimizeDeps: {
         exclude: ['i18n-svelte-runes-lite']

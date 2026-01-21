@@ -9,7 +9,6 @@
 
 import fs from 'fs';
 import path from 'path';
-import { toRelativeFromSrc } from './shared.js';
 
 // ============================================================================
 // File Utilities
@@ -78,13 +77,9 @@ export default app;
  * @returns {{ file: string | null, error?: string }}
  */
 function generateApp(config) {
-    const { cwd, isTypeScript, localesPath } = config;
+    const { cwd, isTypeScript } = config;
 
     const appPath = path.join(cwd, 'src', 'App.svelte');
-
-    // Calculate the import path for i18n module
-    // e.g., 'src/lib/i18n/locales' -> './lib/i18n'
-    const i18nImportPath = toRelativeFromSrc(localesPath);
 
     if (fs.existsSync(appPath)) {
         let content = fs.readFileSync(appPath, 'utf8');
@@ -99,7 +94,7 @@ function generateApp(config) {
             file: null,
             error: `Please manually update App.svelte. Import i18n, t, and setLocale:
   <script>
-    import { i18n, t, setLocale, supportedLocales } from '${i18nImportPath}';
+    import { i18n, t, setLocale, supportedLocales } from '$lib/i18n';
   </script>
 
   <h1>{t('hello')}</h1>
@@ -112,7 +107,7 @@ function generateApp(config) {
     const scriptLang = isTypeScript ? ' lang="ts"' : '';
 
     const content = `<script${scriptLang}>
-    import { i18n, t, setLocale, supportedLocales } from '${i18nImportPath}';
+    import { i18n, t, setLocale, supportedLocales } from '$lib/i18n';
 
     function handleLocaleChange(e${isTypeScript ? ': Event' : ''}) {
         const target = e.target${isTypeScript ? ' as HTMLSelectElement' : ''};
