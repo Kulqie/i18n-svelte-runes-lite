@@ -703,17 +703,19 @@ export type Translations = typeof import('./locales/${defaultLanguage}.json');
     return `import { createI18n } from 'i18n-svelte-runes-lite';
 ${imports}
 
-const i18n = createI18n${typeAnnotation}({
+// Export i18n instance for reactive access to i18n.locale
+export const i18n = createI18n${typeAnnotation}({
     translations: {
 ${translationsObject}
     },
     initialLocale: '${defaultLanguage}'
 });
 
+// Export commonly used functions
 export const t = i18n.t;
 export const setLocale = i18n.setLocale;
-export const locale = i18n.locale;
 export const supportedLocales = [${languages.map(l => `'${l}'`).join(', ')}];
+// Access current locale via i18n.locale (reactive getter)
 `;
 }
 

@@ -24,7 +24,7 @@ import { detect, detectMonorepo } from './cli/detect.js';
 import { generateSvelteKit } from './cli/generators/sveltekit.js';
 import { generateWails } from './cli/generators/wails.js';
 import { generateSPA } from './cli/generators/spa.js';
-import { patchViteConfig, createLocaleFiles, createLocalesIndex } from './cli/generators/shared.js';
+import { patchViteConfig, createLocaleFiles, createLocalesIndex, toRelativeFromSrc } from './cli/generators/shared.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -640,9 +640,14 @@ async function runInit() {
         }
 
         // Step 6: Next steps
+        // Compute the same import path that was used in generated App.svelte
+        const i18nImportPath = framework === 'sveltekit'
+            ? '$lib/i18n'
+            : toRelativeFromSrc(localesPath);
+
         const exampleImport = framework === 'sveltekit'
             ? "import { useI18n } from 'i18n-svelte-runes-lite/context';\n    const { t } = useI18n();"
-            : "import { t } from '$lib/i18n';";
+            : `import { i18n, t, setLocale } from '${i18nImportPath}';`;
 
         console.log(`
 ${styles.bold}${styles.cyan}Next steps:${styles.reset}
@@ -655,6 +660,7 @@ ${styles.bold}${styles.cyan}Next steps:${styles.reset}
     ${exampleImport}
 
     <p>{t('hello')}</p>
+    <p>Current: {i18n.locale}</p>
 
 ${styles.green}✓${styles.reset} Setup complete!
 `);

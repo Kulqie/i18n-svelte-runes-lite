@@ -25,7 +25,8 @@ import { createI18n } from 'i18n-svelte-runes-lite';
 import en from './locales/en.json';
 import pl from './locales/pl.json';
 
-const i18n = createI18n<typeof en>({
+// Export i18n instance for reactive access to i18n.locale
+export const i18n = createI18n<typeof en>({
     translations: { en, pl },
     initialLocale: 'en'
 });
@@ -37,10 +38,11 @@ export const setLocale = i18n.setLocale;
 ```svelte
 <!-- App.svelte -->
 <script>
-    import { t, setLocale } from '$lib/i18n';
+    import { i18n, t, setLocale } from '$lib/i18n';
 </script>
 
 <h1>{t('welcome.title')}</h1>
+<p>Current: {i18n.locale}</p>
 <button onclick={() => setLocale('pl')}>Polski</button>
 ```
 

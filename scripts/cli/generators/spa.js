@@ -97,12 +97,13 @@ function generateApp(config) {
         // Can't easily patch, return instructions
         return {
             file: null,
-            error: `Please manually update App.svelte. Import t and setLocale:
+            error: `Please manually update App.svelte. Import i18n, t, and setLocale:
   <script>
-    import { t, setLocale, supportedLocales } from '${i18nImportPath}';
+    import { i18n, t, setLocale, supportedLocales } from '${i18nImportPath}';
   </script>
 
   <h1>{t('hello')}</h1>
+  <p>Current: {i18n.locale}</p>
   <button onclick={() => setLocale('pl')}>Polski</button>`
         };
     }
@@ -111,7 +112,7 @@ function generateApp(config) {
     const scriptLang = isTypeScript ? ' lang="ts"' : '';
 
     const content = `<script${scriptLang}>
-    import { t, setLocale, supportedLocales } from '${i18nImportPath}';
+    import { i18n, t, setLocale, supportedLocales } from '${i18nImportPath}';
 
     function handleLocaleChange(e${isTypeScript ? ': Event' : ''}) {
         const target = e.target${isTypeScript ? ' as HTMLSelectElement' : ''};
@@ -125,7 +126,8 @@ function generateApp(config) {
 
     <div class="locale-switcher">
         <label for="locale">Language:</label>
-        <select id="locale" onchange={handleLocaleChange}>
+        <!-- Use i18n.locale for reactive current value -->
+        <select id="locale" value={i18n.locale} onchange={handleLocaleChange}>
             {#each supportedLocales as loc}
                 <option value={loc}>{loc.toUpperCase()}</option>
             {/each}
