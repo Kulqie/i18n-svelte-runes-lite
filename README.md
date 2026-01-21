@@ -66,10 +66,12 @@ export const setLocale = i18n.setLocale;
 <!-- +page.svelte -->
 <script>
     import { useI18n } from 'i18n-svelte-runes-lite/context';
-    const { t, setLocale } = useI18n<typeof en>();
+    const i18n = useI18n<typeof en>();
+    const { t, setLocale } = i18n;  // Functions safe to destructure
 </script>
 
 <h1>{t('welcome.title')}</h1>
+<p>Current: {i18n.locale}</p>  <!-- Use i18n.locale for reactivity! -->
 ```
 
 ## Documentation

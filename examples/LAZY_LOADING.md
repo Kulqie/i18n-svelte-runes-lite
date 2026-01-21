@@ -45,8 +45,16 @@ const i18n = createI18n<Schema>({
 export const t = i18n.t;
 export const setLocale = i18n.setLocale;
 export const loadLocale = i18n.loadLocale;
-export const isLoadingLocale = i18n.isLoadingLocale;
-export const locale = i18n.locale;
+
+// ⚠️ IMPORTANT: Do NOT export locale or isLoadingLocale as const!
+// These are getters that return primitive values. Exporting them captures
+// the value once at module load time, breaking reactivity.
+//
+// ❌ WRONG: export const locale = i18n.locale;  // Captured once, never updates!
+// ✅ CORRECT: Export the i18n object and access locale through it
+
+// Export instance - use i18n.locale and i18n.isLoadingLocale for reactivity
+export { i18n };
 ```
 
 ### Step 2: Use in Components
@@ -54,7 +62,7 @@ export const locale = i18n.locale;
 ```svelte
 <!-- LanguageSwitcher.svelte -->
 <script>
-    import { setLocale, isLoadingLocale } from '$lib/i18n';
+    import { i18n, setLocale } from '$lib/i18n';
 
     async function changeToPolish() {
         // Automatically loads pl.json if not loaded
@@ -71,7 +79,8 @@ export const locale = i18n.locale;
 <button onclick={changeToPolish}>Polski</button>
 <button onclick={changeToGerman}>Deutsch</button>
 
-{#if isLoadingLocale}
+<!-- Use i18n.isLoadingLocale for reactivity! -->
+{#if i18n.isLoadingLocale}
     <p class="loading">Loading translations...</p>
 {/if}
 
@@ -173,7 +182,7 @@ if (initialLocale !== 'en') {
 
 ```svelte
 <script>
-    import { setLocale, isLoadingLocale, locale } from '$lib/i18n';
+    import { i18n, setLocale } from '$lib/i18n';
 
     let loadingTimeout: number;
 
@@ -189,19 +198,20 @@ if (initialLocale !== 'en') {
     }
 
     $effect(() => {
-        console.log('Locale changed to:', locale);
+        // Use i18n.locale for reactivity!
+        console.log('Locale changed to:', i18n.locale);
     });
 </script>
 
 <div class="lang-switcher">
     <button
-        disabled={isLoadingLocale}
+        disabled={i18n.isLoadingLocale}
         onclick={() => switchLocale('pl')}
     >
         Polski
     </button>
 
-    {#if isLoadingLocale}
+    {#if i18n.isLoadingLocale}
         <span class="spinner">⟳</span>
     {/if}
 </div>

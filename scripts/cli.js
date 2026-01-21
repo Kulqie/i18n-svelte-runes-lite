@@ -644,7 +644,7 @@ async function runInit() {
 
         // Step 6: Next steps
         const exampleImport = framework === 'sveltekit'
-            ? "import { useI18n } from 'i18n-svelte-runes-lite/context';\n    const { t } = useI18n();"
+            ? "import { useI18n } from 'i18n-svelte-runes-lite/context';\n    const i18n = useI18n();\n    const { t, setLocale } = i18n;  // Functions safe to destructure"
             : "import { i18n, t, setLocale } from '$lib/i18n';";
 
         console.log(`
@@ -658,7 +658,7 @@ ${styles.bold}${styles.cyan}Next steps:${styles.reset}
     ${exampleImport}
 
     <p>{t('hello')}</p>
-    <p>Current: {i18n.locale}</p>
+    <p>Current: {i18n.locale}</p>  <!-- Use i18n.locale for reactivity! -->
 
 ${styles.green}✓${styles.reset} Setup complete!
 `);
