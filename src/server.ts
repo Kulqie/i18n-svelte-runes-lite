@@ -236,10 +236,73 @@ export function createI18nHook(options: HookOptions = {}): Handle {
         return event.url.protocol === 'https:';
     }
 
+    /**
+     * Parse Accept-Language header and find the best matching locale.
+     * Format: "en-US,en;q=0.9,pl;q=0.8" -> tries each in order of preference
+     */
+    function parseAcceptLanguage(header: string | null): string | null {
+        if (!header) return null;
+
+        // Parse and sort by quality value (q=0.x), defaulting to 1.0
+        const languages = header
+            .split(',')
+            .map(part => {
+                const [lang, qPart] = part.trim().split(';');
+                const q = qPart ? parseFloat(qPart.replace('q=', '')) : 1.0;
+                return { lang: lang.trim(), q };
+            })
+            .sort((a, b) => b.q - a.q);
+
+        // Find first matching supported locale
+        for (const { lang } of languages) {
+            if (!lang) continue;
+
+            const lowerLang = lang.toLowerCase();
+
+            // Check if supportedLocales is configured
+            if (supportedMap) {
+                // Direct match
+                const exactMatch = supportedMap.get(lowerLang);
+                if (exactMatch) return exactMatch;
+
+                // Try base language (e.g., 'en-US' -> 'en')
+                const baseLang = lowerLang.split('-')[0];
+                if (baseLang !== lowerLang) {
+                    const baseMatch = supportedMap.get(baseLang);
+                    if (baseMatch) return baseMatch;
+                }
+
+                // Try finding a regional variant (e.g., 'en' -> 'en-US')
+                for (const [lowerLocale, originalLocale] of supportedMap) {
+                    if (lowerLocale.startsWith(baseLang + '-')) {
+                        return originalLocale;
+                    }
+                }
+            } else {
+                // No supportedLocales - basic validation
+                if (/^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$/.test(lang)) {
+                    return lang;
+                }
+            }
+        }
+
+        return null;
+    }
+
     return async function handle({ event, resolve }) {
-        // --- 1. READ LOCALE FROM COOKIE ---
+        // --- 1. READ LOCALE FROM COOKIE OR ACCEPT-LANGUAGE HEADER ---
         const cookieValue = event.cookies.get(cookieName);
-        const locale = validateLocale(cookieValue);
+        let locale: string;
+
+        if (cookieValue) {
+            // User has explicit preference saved
+            locale = validateLocale(cookieValue);
+        } else {
+            // No cookie - try Accept-Language header for browser/OS preference
+            const acceptLanguage = event.request.headers.get('accept-language');
+            const detectedLocale = parseAcceptLanguage(acceptLanguage);
+            locale = detectedLocale ?? fallbackLocale;
+        }
 
         // Set locale in locals for use in load functions
         // Cast to any since App.Locals is defined by the user's app

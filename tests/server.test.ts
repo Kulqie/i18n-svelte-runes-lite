@@ -9,9 +9,14 @@ interface MockCookies {
 	set: ReturnType<typeof vi.fn>;
 }
 
+interface MockHeaders {
+	get: ReturnType<typeof vi.fn>;
+}
+
 interface MockRequest {
 	method: string;
 	json: ReturnType<typeof vi.fn>;
+	headers: MockHeaders;
 }
 
 interface MockEvent {
@@ -27,20 +32,30 @@ function createMockEvent(overrides: Partial<{
 	cookieValue: string | undefined;
 	jsonBody: unknown;
 	protocol: string;
+	acceptLanguage: string | null;
 }>): MockEvent {
 	const {
 		pathname = '/',
 		method = 'GET',
 		cookieValue = undefined,
 		jsonBody = {},
-		protocol = 'https:'
+		protocol = 'https:',
+		acceptLanguage = null
 	} = overrides;
 
 	return {
 		url: new URL(`${protocol}//localhost${pathname}`),
 		request: {
 			method,
-			json: vi.fn().mockResolvedValue(jsonBody)
+			json: vi.fn().mockResolvedValue(jsonBody),
+			headers: {
+				get: vi.fn().mockImplementation((name: string) => {
+					if (name.toLowerCase() === 'accept-language') {
+						return acceptLanguage;
+					}
+					return null;
+				})
+			}
 		},
 		cookies: {
 			get: vi.fn().mockReturnValue(cookieValue),
@@ -206,7 +221,82 @@ describe('createI18nHook', () => {
 
 			expect(event.locals.locale).toBe('en-US');
 		});
+	});
 
+	describe('Accept-Language header detection', () => {
+		it('uses Accept-Language when no cookie is set', async () => {
+			const hook = createI18nHook({ supportedLocales: ['en', 'pl', 'de'] });
+			const event = createMockEvent({ acceptLanguage: 'pl,en;q=0.9' });
+			const resolve = createMockResolve();
+
+			await hook({ event: event as any, resolve });
+
+			expect(event.locals.locale).toBe('pl');
+		});
+
+		it('respects quality values in Accept-Language', async () => {
+			const hook = createI18nHook({ supportedLocales: ['en', 'pl', 'de'] });
+			const event = createMockEvent({ acceptLanguage: 'fr;q=0.9,de;q=0.8,en;q=0.7' });
+			const resolve = createMockResolve();
+
+			await hook({ event: event as any, resolve });
+
+			// fr is not supported, so should pick de (next highest q)
+			expect(event.locals.locale).toBe('de');
+		});
+
+		it('matches base language from regional variant', async () => {
+			const hook = createI18nHook({ supportedLocales: ['en', 'pl'] });
+			const event = createMockEvent({ acceptLanguage: 'pl-PL,en-US;q=0.9' });
+			const resolve = createMockResolve();
+
+			await hook({ event: event as any, resolve });
+
+			expect(event.locals.locale).toBe('pl');
+		});
+
+		it('matches regional variant from base language', async () => {
+			const hook = createI18nHook({ supportedLocales: ['en-US', 'pl-PL'] });
+			const event = createMockEvent({ acceptLanguage: 'pl,en;q=0.9' });
+			const resolve = createMockResolve();
+
+			await hook({ event: event as any, resolve });
+
+			expect(event.locals.locale).toBe('pl-PL');
+		});
+
+		it('cookie takes priority over Accept-Language', async () => {
+			const hook = createI18nHook({ supportedLocales: ['en', 'pl', 'de'] });
+			const event = createMockEvent({ cookieValue: 'de', acceptLanguage: 'pl,en;q=0.9' });
+			const resolve = createMockResolve();
+
+			await hook({ event: event as any, resolve });
+
+			expect(event.locals.locale).toBe('de');
+		});
+
+		it('falls back to default when Accept-Language has no matches', async () => {
+			const hook = createI18nHook({ fallbackLocale: 'en', supportedLocales: ['en', 'pl'] });
+			const event = createMockEvent({ acceptLanguage: 'fr,es;q=0.9' });
+			const resolve = createMockResolve();
+
+			await hook({ event: event as any, resolve });
+
+			expect(event.locals.locale).toBe('en');
+		});
+
+		it('falls back to default when no Accept-Language header', async () => {
+			const hook = createI18nHook({ fallbackLocale: 'en' });
+			const event = createMockEvent({ acceptLanguage: null });
+			const resolve = createMockResolve();
+
+			await hook({ event: event as any, resolve });
+
+			expect(event.locals.locale).toBe('en');
+		});
+	});
+
+	describe('locale matching (cookie)', () => {
 		it('matches base language to regional variant', async () => {
 			const hook = createI18nHook({ supportedLocales: ['en-US', 'pl'] });
 			const event = createMockEvent({ cookieValue: 'en' });

@@ -594,4 +594,81 @@ describe('createI18n', () => {
 			expect(i18n).toBeDefined();
 		});
 	});
+
+	describe('navigator.language detection', () => {
+		let originalNavigator: Navigator;
+
+		beforeEach(() => {
+			originalNavigator = global.navigator;
+		});
+
+		afterEach(() => {
+			Object.defineProperty(global, 'navigator', {
+				value: originalNavigator,
+				writable: true,
+				configurable: true
+			});
+		});
+
+		it('uses navigator.language when no initialLocale and no stored preference', () => {
+			Object.defineProperty(global, 'navigator', {
+				value: { language: 'pl', languages: ['pl', 'en'] },
+				writable: true,
+				configurable: true
+			});
+
+			const i18n = createI18n<Schema>({
+				translations: { en: enTranslations, pl: plTranslations },
+				environment: 'wails'
+			});
+
+			expect(i18n.locale).toBe('pl');
+		});
+
+		it('falls back to base language from regional variant', () => {
+			Object.defineProperty(global, 'navigator', {
+				value: { language: 'pl-PL', languages: ['pl-PL', 'en-US'] },
+				writable: true,
+				configurable: true
+			});
+
+			const i18n = createI18n<Schema>({
+				translations: { en: enTranslations, pl: plTranslations },
+				environment: 'wails'
+			});
+
+			expect(i18n.locale).toBe('pl');
+		});
+
+		it('tries navigator.languages array when primary language not supported', () => {
+			Object.defineProperty(global, 'navigator', {
+				value: { language: 'fr', languages: ['fr', 'pl', 'en'] },
+				writable: true,
+				configurable: true
+			});
+
+			const i18n = createI18n<Schema>({
+				translations: { en: enTranslations, pl: plTranslations },
+				environment: 'wails'
+			});
+
+			expect(i18n.locale).toBe('pl');
+		});
+
+		it('uses fallback when no navigator languages match', () => {
+			Object.defineProperty(global, 'navigator', {
+				value: { language: 'fr', languages: ['fr', 'de'] },
+				writable: true,
+				configurable: true
+			});
+
+			const i18n = createI18n<Schema>({
+				translations: { en: enTranslations, pl: plTranslations },
+				fallbackLocale: 'en',
+				environment: 'wails'
+			});
+
+			expect(i18n.locale).toBe('en');
+		});
+	});
 });

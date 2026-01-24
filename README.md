@@ -10,6 +10,7 @@
 ✅ **SSR Compatible** - Context API support for SvelteKit
 ✅ **Magic Hook** - One-line setup for secure locale persistence
 ✅ **Multi-Environment** - Works in SvelteKit, Wails, and SPAs
+✅ **Auto Language Detection** - Detects browser/OS language preference
 ✅ **Lazy Loading** - Load translations on-demand
 ✅ **Namespace Support** - Split translations by feature/route
 ✅ **Intl Integration** - Uses native `Intl` APIs
@@ -219,6 +220,40 @@ const i18n = createI18n<Schema>({
 // Automatically loads when switching
 await i18n.setLocale('pl');
 ```
+
+## Auto Language Detection
+
+The library automatically detects the user's preferred language from their browser or OS settings when no explicit preference is saved.
+
+**Detection priority:**
+
+| Environment | Priority Order |
+|-------------|----------------|
+| **SvelteKit (SSR)** | 1. Cookie → 2. `Accept-Language` header → 3. Fallback |
+| **Wails/Desktop** | 1. localStorage → 2. `navigator.language` → 3. Fallback |
+| **SPA** | 1. Cookie → 2. `navigator.language` → 3. Fallback |
+
+**How it works:**
+
+```typescript
+// No initialLocale needed - auto-detects from browser/OS
+const i18n = createI18n<Schema>({
+    translations: { en, pl, de },
+    fallbackLocale: 'en'  // Used when detection fails
+});
+
+// User with Polish browser settings → i18n.locale === 'pl'
+// User with German browser settings → i18n.locale === 'de'
+// User with French browser settings → i18n.locale === 'en' (fallback)
+```
+
+**Language matching:**
+- Matches exact locales (`pl` → `pl`)
+- Falls back from regional to base (`pl-PL` → `pl`)
+- Matches base to regional (`pl` → `pl-PL` if only `pl-PL` is available)
+- Tries all languages in `navigator.languages` array
+
+Once the user manually changes the locale (via `setLocale()`), their preference is persisted and used on subsequent visits.
 
 ## Project Setup CLI
 

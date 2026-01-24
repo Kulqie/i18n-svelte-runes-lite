@@ -253,6 +253,25 @@ function detectInitialLocale(
         }
     }
 
+    // --- 4. Check navigator.language (browser/OS preference) ---
+    // This detects the user's browser or OS language settings as a fallback
+    // when no explicit user preference has been saved.
+    if (typeof navigator !== 'undefined' && navigator.language) {
+        const validated = validateLocale(navigator.language);
+        if (validated) {
+            return validated;
+        }
+        // Also try navigator.languages array for additional preferences
+        if (navigator.languages?.length) {
+            for (const lang of navigator.languages) {
+                const validatedLang = validateLocale(lang);
+                if (validatedLang) {
+                    return validatedLang;
+                }
+            }
+        }
+    }
+
     return fallback;
 }
 
